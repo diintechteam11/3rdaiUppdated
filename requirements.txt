@@ -1,0 +1,16 @@
+fastapi
+uvicorn[standard]
+ultralytics
+opencv-python
+python-multipart
+jinja2
+numpy
+easyocr
+paddleocr
+paddlepaddle
+webcolors
+scikit-learn
+boto3
+python-dotenv
+psycopg2-binary
+sqlalchemy

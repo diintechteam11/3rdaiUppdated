@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Camera Management | 3rdAI</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  body { font-family: 'Outfit', sans-serif; }
+  .bg-mesh { background: #020617; background-image: radial-gradient(at 0% 0%, hsla(253,16%,7%,1) 0, transparent 50%), radial-gradient(at 50% 0%, hsla(225,39%,30%,1) 0, transparent 50%), radial-gradient(at 100% 0%, hsla(339,49%,30%,1) 0, transparent 50%); }
+  .glass { background: rgba(255,255,255,0.04); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.1); }
+  .tab-active { border-bottom: 2px solid #818cf8; color: #818cf8; }
+  input, select { background: rgba(255,255,255,0.05) !important; border: 1px solid rgba(255,255,255,0.15) !important; color: #e2e8f0 !important; border-radius: 10px !important; padding: 8px 14px !important; width: 100%; outline: none; }
+  input:focus, select:focus { border-color: rgba(129,140,248,0.5) !important; }
+  input::placeholder { color: #64748b !important; }
+  .btn-primary { background: #4f46e5; color: white; border-radius: 10px; padding: 8px 20px; font-weight: 500; cursor: pointer; transition: background 0.2s; }
+  .btn-primary:hover { background: #4338ca; }
+  .btn-danger { background: #dc2626; color: white; border-radius: 8px; padding: 5px 14px; font-size: 13px; cursor: pointer; }
+  .btn-success { background: #16a34a; color: white; border-radius: 8px; padding: 5px 14px; font-size: 13px; cursor: pointer; }
+  .btn-warn { background: #d97706; color: white; border-radius: 8px; padding: 5px 14px; font-size: 13px; cursor: pointer; }
+  .status-active { background:#14532d; color:#86efac; border-radius:6px; padding:2px 10px; font-size:12px; }
+  .status-recording { background:#7f1d1d; color:#fca5a5; border-radius:6px; padding:2px 10px; font-size:12px; }
+  .status-inactive { background:#1e293b; color:#94a3b8; border-radius:6px; padding:2px 10px; font-size:12px; }
+  .toast { position:fixed; bottom:24px; right:24px; z-index:9999; background:#1e293b; border:1px solid rgba(255,255,255,0.15); color:#e2e8f0; padding:14px 20px; border-radius:12px; font-size:14px; min-width:260px; transition:opacity 0.3s; }
+  select option { background: #1e293b; }
+</style>
+</head>
+<body class="bg-mesh min-h-screen text-slate-200 p-4 md:p-8">
+
+<!-- API Key Banner -->
+<div id="keyBanner" class="glass rounded-2xl p-4 mb-6 flex flex-wrap items-center gap-4">
+  <span class="text-slate-400 text-sm">API Key:</span>
+  <input type="text" id="apiKeyInput" placeholder="Paste your sk-... key here" style="max-width:340px" oninput="saveKey()">
+  <a href="/api-access" class="text-indigo-400 text-sm hover:underline">Generate key →</a>
+  <span id="keyStatus" class="text-xs text-slate-500"></span>
+</div>
+
+<!-- Header -->
+<header class="flex flex-wrap justify-between items-center mb-8 gap-4">
+  <div>
+    <h1 class="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 via-indigo-400 to-purple-400">Camera Management</h1>
+    <p class="text-slate-400 mt-1 text-sm">Register, monitor and control all cameras</p>
+  </div>
+  <div class="flex gap-3">
+    <a href="/" class="glass px-4 py-2 rounded-xl text-sm text-slate-300 hover:text-white">← AI Analytics</a>
+    <button onclick="openTab('cameras')" class="btn-primary">+ Register Camera</button>
+  </div>
+</header>
+
+<!-- Tabs -->
+<div class="flex gap-6 border-b border-white/10 mb-6 text-slate-400 text-sm font-medium">
+  <button onclick="openTab('cameras')" id="tab-cameras" class="pb-2 px-1 tab-active transition-colors">Cameras</button>
+  <button onclick="openTab('recordings')" id="tab-recordings" class="pb-2 px-1 hover:text-white transition-colors">Recordings</button>
+  <button onclick="openTab('schedules')" id="tab-schedules" class="pb-2 px-1 hover:text-white transition-colors">Schedules</button>
+  <button onclick="openTab('analysis')" id="tab-analysis" class="pb-2 px-1 hover:text-white transition-colors">Analysis</button>
+</div>
+
+<!-- ── CAMERAS TAB ────────────────────────────────────────── -->
+<div id="pane-cameras">
+  <!-- Register form -->
+  <div class="glass rounded-2xl p-6 mb-6">
+    <h2 class="text-lg font-semibold mb-4">Register New Camera</h2>
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+      <input id="reg-name" placeholder="Camera name *">
+      <input id="reg-ip" placeholder="RTSP / IP URL *">
+      <input id="reg-location" placeholder="Location *">
+      <input id="reg-brand" placeholder="Brand (optional)">
+    </div>
+    <button class="btn-primary" onclick="registerCamera()">Register Camera</button>
+  </div>
+
+  <!-- Filters -->
+  <div class="glass rounded-2xl p-4 mb-4 flex flex-wrap gap-3">
+    <input id="cam-search" placeholder="Search name or location..." style="max-width:220px" oninput="loadCameras()">
+    <select id="cam-status" onchange="loadCameras()" style="max-width:160px">
+      <option value="">All statuses</option>
+      <option value="active">Active</option>
+      <option value="recording">Recording</option>
+      <option value="inactive">Inactive</option>
+    </select>
+    <select id="cam-sort" onchange="loadCameras()" style="max-width:180px">
+      <option value="latest">Latest first</option>
+      <option value="oldest">Oldest first</option>
+      <option value="name_asc">Name A→Z</option>
+      <option value="name_desc">Name Z→A</option>
+    </select>
+    <button class="btn-primary" onclick="loadCameras()">Search</button>
+  </div>
+
+  <!-- Camera list -->
+  <div id="cameraList" class="space-y-3"></div>
+  <div id="cam-pagination" class="flex gap-3 mt-4 items-center text-sm text-slate-400"></div>
+</div>
+
+<!-- ── RECORDINGS TAB ─────────────────────────────────────── -->
+<div id="pane-recordings" class="hidden">
+  <div class="glass rounded-2xl p-4 mb-4 flex flex-wrap gap-3">
+    <input id="rec-search" placeholder="Search video name..." style="max-width:200px">
+    <input id="rec-from" type="date" style="max-width:160px">
+    <input id="rec-to" type="date" style="max-width:160px">
+    <select id="rec-source" style="max-width:150px">
+      <option value="">All sources</option>
+      <option value="manual">Manual</option>
+      <option value="auto">Auto</option>
+      <option value="analysis">Analysis</option>
+    </select>
+    <select id="rec-sort" style="max-width:160px">
+      <option value="latest">Latest first</option>
+      <option value="oldest">Oldest first</option>
+    </select>
+    <button class="btn-primary" onclick="loadRecordings()">Search</button>
+  </div>
+  <div id="recordingList" class="space-y-3"></div>
+  <div id="rec-pagination" class="flex gap-3 mt-4 items-center text-sm text-slate-400"></div>
+</div>
+
+<!-- ── SCHEDULES TAB ──────────────────────────────────────── -->
+<div id="pane-schedules" class="hidden">
+  <div class="glass rounded-2xl p-6 mb-6">
+    <h2 class="text-lg font-semibold mb-4">Create / Update Schedule</h2>
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
+      <input id="sch-cam-id" placeholder="Camera ID *">
+      <select id="sch-mode" onchange="toggleCustomTime()">
+        <option value="24_7">24/7 Continuous</option>
+        <option value="custom">Custom Window</option>
+      </select>
+      <input id="sch-tz" placeholder="Timezone (e.g. Asia/Kolkata)" value="UTC">
+      <div id="sch-time-row" class="hidden col-span-full grid grid-cols-2 gap-4">
+        <input id="sch-start" placeholder="Start HH:MM (e.g. 07:00)">
+        <input id="sch-end" placeholder="End HH:MM (e.g. 19:00)">
+      </div>
+      <input id="sch-creator" placeholder="Created by *">
+    </div>
+    <label class="flex items-center gap-2 text-sm text-slate-300 mb-4">
+      <input type="checkbox" id="sch-enabled" checked class="w-4 h-4"> Enabled
+    </label>
+    <button class="btn-primary" onclick="createSchedule()">Save Schedule</button>
+  </div>
+
+  <div class="glass rounded-2xl p-4 mb-4 flex flex-wrap gap-3">
+    <select id="sch-filter-mode" style="max-width:180px">
+      <option value="">All modes</option>
+      <option value="24_7">24/7</option>
+      <option value="custom">Custom</option>
+    </select>
+    <select id="sch-filter-enabled" style="max-width:160px">
+      <option value="">All</option>
+      <option value="true">Enabled only</option>
+      <option value="false">Disabled only</option>
+    </select>
+    <button class="btn-primary" onclick="loadSchedules()">Filter</button>
+  </div>
+  <div id="scheduleList" class="space-y-3"></div>
+</div>
+
+<!-- ── ANALYSIS TAB ───────────────────────────────────────── -->
+<div id="pane-analysis" class="hidden">
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+    <div class="glass rounded-2xl p-6">
+      <h2 class="text-lg font-semibold mb-4 text-green-400">Start Analysis Capture</h2>
+      <div class="space-y-3">
+        <input id="an-cam-id" placeholder="Camera ID *">
+        <select id="an-type">
+          <option value="object_detection">Object Detection</option>
+          <option value="intrusion">Intrusion Detection</option>
+          <option value="face_recognition">Face Recognition</option>
+          <option value="custom">Custom</option>
+        </select>
+        <input id="an-triggered-by" placeholder="Triggered by (user/system) *">
+      </div>
+      <button class="btn-success mt-4 w-full py-2" onclick="startAnalysis()">Start Capture</button>
+    </div>
+    <div class="glass rounded-2xl p-6">
+      <h2 class="text-lg font-semibold mb-4 text-red-400">Stop Analysis Capture</h2>
+      <div class="space-y-3">
+        <input id="an-stop-cam-id" placeholder="Camera ID *">
+        <input id="an-session-id" placeholder="Analysis Session ID *">
+        <input id="an-result" placeholder="Analysis result (optional)">
+        <input id="an-stopped-by" placeholder="Stopped by *">
+      </div>
+      <button class="btn-danger mt-4 w-full py-2" onclick="stopAnalysis()">Stop Capture</button>
+    </div>
+  </div>
+
+  <div class="glass rounded-2xl p-4 mb-4 flex flex-wrap gap-3 items-end">
+    <div>
+      <p class="text-xs text-slate-500 mb-1">Camera ID</p>
+      <input id="an-list-cam" placeholder="Camera ID" style="max-width:220px">
+    </div>
+    <button class="btn-primary" onclick="loadAnalysisSessions()">Load Sessions</button>
+  </div>
+  <div id="analysisList" class="space-y-3"></div>
+</div>
+
+<!-- Toast -->
+<div id="toast" class="toast opacity-0 pointer-events-none"></div>
+
+<script>
+const API = '/api/v1';
+let camPage = 1, recPage = 1;
+
+// ── Key helpers ─────────────────────────────────────────────
+function saveKey() {
+  const k = document.getElementById('apiKeyInput').value.trim();
+  if (k) { localStorage.setItem('api_key', k); document.getElementById('keyStatus').textContent = 'Saved'; }
+}
+function getKey() {
+  const k = localStorage.getItem('api_key') || document.getElementById('apiKeyInput').value.trim();
+  if (!k) { toast('Paste your API key at the top first.', true); return null; }
+  return k;
+}
+function headers() { return { 'Content-Type': 'application/json', 'X-API-Key': getKey() }; }
+async function api(method, path, body) {
+  const k = getKey(); if (!k) return null;
+  const res = await fetch(API + path, { method, headers: headers(), body: body ? JSON.stringify(body) : undefined });
+  if (res.status === 204) return {};
+  return res.json();
+}
+
+// ── Toast ───────────────────────────────────────────────────
+function toast(msg, err=false) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.borderColor = err ? '#dc2626' : '#4f46e5';
+  t.style.opacity = '1';
+  setTimeout(() => t.style.opacity = '0', 3500);
+}
+
+// ── Tabs ────────────────────────────────────────────────────
+function openTab(name) {
+  ['cameras','recordings','schedules','analysis'].forEach(t => {
+    document.getElementById('pane-'+t).classList.add('hidden');
+    document.getElementById('tab-'+t)?.classList.remove('tab-active');
+  });
+  document.getElementById('pane-'+name).classList.remove('hidden');
+  document.getElementById('tab-'+name)?.classList.add('tab-active');
+  if (name==='cameras') loadCameras();
+  if (name==='recordings') loadRecordings();
+  if (name==='schedules') loadSchedules();
+}
+
+// ── On load ─────────────────────────────────────────────────
+window.onload = () => {
+  const saved = localStorage.getItem('api_key');
+  if (saved) { document.getElementById('apiKeyInput').value = saved; document.getElementById('keyStatus').textContent = 'Loaded'; }
+  loadCameras();
+};
+
+// ═══════════════════════════════════════════════════════════
+// CAMERAS
+// ═══════════════════════════════════════════════════════════
+async function loadCameras(page=1) {
+  camPage = page;
+  const search = document.getElementById('cam-search').value;
+  const status = document.getElementById('cam-status').value;
+  const sort = document.getElementById('cam-sort').value;
+  const params = new URLSearchParams({ sort, page, page_size: 10 });
+  if (search) params.set('search', search);
+  if (status) params.set('status', status);
+  const data = await api('GET', `/cameras?${params}`);
+  if (!data) return;
+  if (data.error) { toast(data.message, true); return; }
+
+  const list = document.getElementById('cameraList');
+  list.innerHTML = data.cameras.length === 0 ? '<p class="text-slate-500 text-sm">No cameras found.</p>' :
+    data.cameras.map(c => `
+      <div class="glass rounded-2xl p-5 flex flex-wrap justify-between items-start gap-4">
+        <div>
+          <div class="flex items-center gap-3 mb-1">
+            <span class="font-semibold text-white">${c.name}</span>
+            <span class="status-${c.status}">${c.status}</span>
+          </div>
+          <div class="text-sm text-slate-400 space-y-0.5">
+            <div>ID: <code class="text-indigo-300 text-xs">${c.id}</code></div>
+            <div>IP: ${c.ip} &nbsp;|&nbsp; Location: ${c.location||'—'} &nbsp;|&nbsp; Brand: ${c.brand||'—'}</div>
+            <div>Registered: ${fmtDate(c.created_at)}</div>
+          </div>
+        </div>
+        <div class="flex gap-2 flex-wrap">
+          ${c.is_recording
+            ? `<button class="btn-danger" onclick="stopRec('${c.id}')">Stop Recording</button>`
+            : `<button class="btn-success" onclick="startRec('${c.id}')">Start Recording</button>`}
+          <button class="btn-warn" onclick="viewRecStatus('${c.id}')">Status</button>
+        </div>
+      </div>`).join('');
+
+  const pag = document.getElementById('cam-pagination');
+  const totalPages = Math.ceil(data.total / 10);
+  pag.innerHTML = `<span>Page ${page} of ${totalPages} (${data.total} total)</span>
+    ${page>1?`<button class="btn-primary px-3 py-1" onclick="loadCameras(${page-1})">← Prev</button>`:''}
+    ${page<totalPages?`<button class="btn-primary px-3 py-1" onclick="loadCameras(${page+1})">Next →</button>`:''}`;
+}
+
+async function registerCamera() {
+  const name = document.getElementById('reg-name').value.trim();
+  const ip = document.getElementById('reg-ip').value.trim();
+  const location = document.getElementById('reg-location').value.trim();
+  const brand = document.getElementById('reg-brand').value.trim();
+  if (!name||!ip||!location) { toast('Name, IP and Location are required.', true); return; }
+  const data = await api('POST', '/cameras', { name, ip, location, brand: brand||undefined });
+  if (!data) return;
+  if (data.error) { toast(data.message, true); return; }
+  toast(`Camera "${data.name}" registered! ID: ${data.id}`);
+  ['reg-name','reg-ip','reg-location','reg-brand'].forEach(id => document.getElementById(id).value='');
+  loadCameras();
+}
+
+async function startRec(cameraId) {
+  const by = prompt('Your name (initiated_by):'); if (!by) return;
+  const note = prompt('Optional note (or blank):');
+  const data = await api('POST', `/cameras/${cameraId}/recording/start`, { initiated_by: by, note: note||undefined });
+  if (!data) return;
+  data.error ? toast(data.message, true) : toast(`Recording started! Session: ${data.session_id}`);
+  loadCameras();
+}
+
+async function stopRec(cameraId) {
+  const by = prompt('Your name (stopped_by):'); if (!by) return;
+  const data = await api('POST', `/cameras/${cameraId}/recording/stop`, { stopped_by: by });
+  if (!data) return;
+  data.error ? toast(data.message, true) : toast(`Recording saved! Duration: ${data.duration_secs}s`);
+  loadCameras();
+}
+
+async function viewRecStatus(cameraId) {
+  const data = await api('GET', `/cameras/${cameraId}/recording/status`);
+  if (!data || data.error) { toast(data?.message||'Error', true); return; }
+  alert(`Camera: ${cameraId}\nRecording: ${data.is_recording}\nSession: ${data.session_id||'none'}\nStarted: ${data.started_at||'—'}\nElapsed: ${data.duration_secs??'—'}s`);
+}
+
+// ═══════════════════════════════════════════════════════════
+// RECORDINGS
+// ═══════════════════════════════════════════════════════════
+async function loadRecordings(page=1) {
+  recPage = page;
+  const params = new URLSearchParams({
+    sort: document.getElementById('rec-sort').value,
+    page, page_size: 10
+  });
+  const s = document.getElementById('rec-search').value; if (s) params.set('search', s);
+  const f = document.getElementById('rec-from').value; if (f) params.set('date_from', f);
+  const t = document.getElementById('rec-to').value; if (t) params.set('date_to', t);
+  const src = document.getElementById('rec-source').value; if (src) params.set('source', src);
+  const data = await api('GET', `/recordings?${params}`);
+  if (!data) return;
+  const list = document.getElementById('recordingList');
+  list.innerHTML = !data.recordings?.length ? '<p class="text-slate-500 text-sm">No recordings found.</p>' :
+    data.recordings.map(r => `
+      <div class="glass rounded-2xl p-4 flex flex-wrap justify-between items-start gap-3">
+        <div>
+          <div class="font-medium text-white mb-1">${r.video_name||'—'}</div>
+          <div class="text-xs text-slate-400 space-y-0.5">
+            <div>ID: <code class="text-indigo-300">${r.id}</code> &nbsp;|&nbsp; Camera: ${r.camera_id}</div>
+            <div>Source: <span class="px-2 py-0.5 rounded bg-indigo-900/50 text-indigo-300">${r.source}</span>
+              &nbsp;|&nbsp; Duration: ${r.duration_secs??'—'}s</div>
+            <div>Started: ${fmtDate(r.started_at)} &nbsp;|&nbsp; Stopped: ${fmtDate(r.stopped_at)}</div>
+            ${r.file_path?`<div><a href="${r.file_path}" target="_blank" class="text-indigo-400 hover:underline text-xs">View file →</a></div>`:''}
+          </div>
+        </div>
+        <button class="btn-danger text-xs" onclick="deleteRec('${r.id}')">Delete</button>
+      </div>`).join('');
+
+  const totalPages = Math.ceil(data.total/10);
+  document.getElementById('rec-pagination').innerHTML =
+    `<span>Page ${page} of ${totalPages} (${data.total} total)</span>
+     ${page>1?`<button class="btn-primary px-3 py-1" onclick="loadRecordings(${page-1})">← Prev</button>`:''}
+     ${page<totalPages?`<button class="btn-primary px-3 py-1" onclick="loadRecordings(${page+1})">Next →</button>`:''}`;
+}
+
+async function deleteRec(id) {
+  if (!confirm('Delete this recording?')) return;
+  const delFile = confirm('Also delete from R2 storage?');
+  const data = await api('DELETE', `/recordings/${id}?delete_file=${delFile}`);
+  if (data?.error) { toast(data.message, true); return; }
+  toast('Recording deleted.'); loadRecordings(recPage);
+}
+
+// ═══════════════════════════════════════════════════════════
+// SCHEDULES
+// ═══════════════════════════════════════════════════════════
+function toggleCustomTime() {
+  const isCustom = document.getElementById('sch-mode').value === 'custom';
+  document.getElementById('sch-time-row').classList.toggle('hidden', !isCustom);
+}
+
+async function createSchedule() {
+  const camera_id = document.getElementById('sch-cam-id').value.trim();
+  const mode = document.getElementById('sch-mode').value;
+  const timezone = document.getElementById('sch-tz').value.trim() || 'UTC';
+  const is_enabled = document.getElementById('sch-enabled').checked;
+  const created_by = document.getElementById('sch-creator').value.trim();
+  if (!camera_id||!created_by) { toast('Camera ID and created_by are required.', true); return; }
+  const body = { mode, is_enabled, timezone, created_by };
+  if (mode === 'custom') {
+    body.custom_start_time = document.getElementById('sch-start').value;
+    body.custom_end_time = document.getElementById('sch-end').value;
+    if (!body.custom_start_time||!body.custom_end_time) { toast('Start and end time required for custom mode.', true); return; }
+  }
+  const data = await api('POST', `/cameras/${camera_id}/schedule`, body);
+  if (!data) return;
+  data.error ? toast(data.message, true) : toast(`Schedule saved! ID: ${data.schedule_id}`);
+  loadSchedules();
+}
+
+async function loadSchedules() {
+  const mode = document.getElementById('sch-filter-mode').value;
+  const enabled = document.getElementById('sch-filter-enabled').value;
+  const params = new URLSearchParams();
+  if (mode) params.set('mode', mode);
+  if (enabled !== '') params.set('is_enabled', enabled);
+  const data = await api('GET', `/schedules?${params}`);
+  if (!data) return;
+  const list = document.getElementById('scheduleList');
+  list.innerHTML = !data.schedules?.length ? '<p class="text-slate-500 text-sm">No schedules found.</p>' :
+    data.schedules.map(s => `
+      <div class="glass rounded-2xl p-4 flex flex-wrap justify-between items-start gap-3">
+        <div>
+          <div class="flex items-center gap-2 mb-1">
+            <span class="font-medium text-white">${s.mode==='24_7'?'24/7 Continuous':'Custom Window'}</span>
+            <span class="${s.is_enabled?'status-active':'status-inactive'}">${s.is_enabled?'enabled':'disabled'}</span>
+          </div>
+          <div class="text-xs text-slate-400 space-y-0.5">
+            <div>Camera: <code class="text-indigo-300">${s.camera_id}</code></div>
+            ${s.custom_start_time?`<div>Hours: ${s.custom_start_time} – ${s.custom_end_time}</div>`:''}
+            <div>Timezone: ${s.timezone} &nbsp;|&nbsp; Created: ${fmtDate(s.created_at)}</div>
+          </div>
+        </div>
+        <button class="btn-danger text-xs" onclick="deleteSchedule('${s.camera_id}')">Remove</button>
+      </div>`).join('');
+}
+
+async function deleteSchedule(cameraId) {
+  if (!confirm('Remove schedule for this camera?')) return;
+  const data = await api('DELETE', `/cameras/${cameraId}/schedule`);
+  if (data?.error) { toast(data.message, true); return; }
+  toast('Schedule removed.'); loadSchedules();
+}
+
+// ═══════════════════════════════════════════════════════════
+// ANALYSIS
+// ═══════════════════════════════════════════════════════════
+async function startAnalysis() {
+  const camera_id = document.getElementById('an-cam-id').value.trim();
+  const analysis_type = document.getElementById('an-type').value;
+  const triggered_by = document.getElementById('an-triggered-by').value.trim();
+  if (!camera_id||!triggered_by) { toast('Camera ID and triggered_by are required.', true); return; }
+  const data = await api('POST', `/cameras/${camera_id}/analysis/start`, { analysis_type, triggered_by });
+  if (!data) return;
+  if (data.error) { toast(data.message, true); return; }
+  document.getElementById('an-stop-cam-id').value = camera_id;
+  document.getElementById('an-session-id').value = data.analysis_session_id;
+  toast(`Analysis started! Session: ${data.analysis_session_id}`);
+}
+
+async function stopAnalysis() {
+  const camera_id = document.getElementById('an-stop-cam-id').value.trim();
+  const analysis_session_id = document.getElementById('an-session-id').value.trim();
+  const analysis_result = document.getElementById('an-result').value.trim();
+  const stopped_by = document.getElementById('an-stopped-by').value.trim();
+  if (!camera_id||!analysis_session_id||!stopped_by) { toast('Camera ID, session ID and stopped_by required.', true); return; }
+  const data = await api('POST', `/cameras/${camera_id}/analysis/stop`, { analysis_session_id, analysis_result: analysis_result||undefined, stopped_by });
+  if (!data) return;
+  data.error ? toast(data.message, true) : toast(`Capture ended! Duration: ${data.duration_secs}s`);
+}
+
+async function loadAnalysisSessions() {
+  const camera_id = document.getElementById('an-list-cam').value.trim();
+  if (!camera_id) { toast('Enter a camera ID.', true); return; }
+  const data = await api('GET', `/cameras/${camera_id}/analysis/sessions`);
+  if (!data) return;
+  const list = document.getElementById('analysisList');
+  list.innerHTML = !data.sessions?.length ? '<p class="text-slate-500 text-sm">No sessions found.</p>' :
+    data.sessions.map(s => `
+      <div class="glass rounded-2xl p-4">
+        <div class="flex justify-between items-start mb-2">
+          <span class="font-medium text-white">${s.analysis_type}</span>
+          <code class="text-indigo-300 text-xs">${s.id}</code>
+        </div>
+        <div class="text-xs text-slate-400 space-y-0.5">
+          <div>Started: ${fmtDate(s.capture_started_at)} &nbsp;|&nbsp; Ended: ${fmtDate(s.capture_ended_at)||'—'}</div>
+          <div>Triggered by: ${s.triggered_by} &nbsp;|&nbsp; Stopped by: ${s.stopped_by||'—'}</div>
+          ${s.analysis_result?`<div>Result: ${s.analysis_result}</div>`:''}
+        </div>
+      </div>`).join('');
+}
+
+// ── Utils ───────────────────────────────────────────────────
+function fmtDate(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleString('en-IN', { dateStyle:'medium', timeStyle:'short' });
+}
+</script>
+</body>
+</html>
