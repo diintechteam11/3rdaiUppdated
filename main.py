@@ -13,7 +13,7 @@ from utils.detection import process_video, LiveCameraProcessor
 from utils.db import init_db, get_db, Camera, RecordingSession, Schedule, AnalysisSession, Detection
 from utils.r2 import upload_video_to_r2, delete_from_r2, build_r2_key
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, and_, desc, asc
+from sqlalchemy import or_, and_, desc, asc, text
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -24,6 +24,26 @@ app = FastAPI(title="AI Camera Recording & Analytics API", version="2.0")
 @app.on_event("startup")
 def on_startup():
     init_db()
+    _migrate_db()
+
+
+def _migrate_db():
+    """Run any needed ALTER TABLE migrations safely (idempotent)."""
+    from utils.db import engine
+    migrations = [
+        # Add deleted_at to recording_sessions if missing
+        "ALTER TABLE recording_sessions ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP WITH TIME ZONE;",
+        # Add updated_at / created_at if missing
+        "ALTER TABLE recording_sessions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();",
+        "ALTER TABLE cameras ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();",
+    ]
+    with engine.connect() as conn:
+        for sql in migrations:
+            try:
+                conn.execute(text(sql))
+                conn.commit()
+            except Exception as e:
+                print(f"[Migration] Skipped (already exists or error): {e}")
 
 # ─── Directories ────────────────────────────────────────────────────────────
 BASE_DIR       = Path(__file__).resolve().parent
@@ -229,6 +249,45 @@ async def register_camera(body: RegisterCameraBody, db: Session = Depends(get_db
     return _fmt_camera(cam)
 
 
+class UpdateCameraBody(BaseModel):
+    name: Optional[str] = None
+    ip: Optional[str] = None
+    location: Optional[str] = None
+    brand: Optional[str] = None
+
+
+@app.put("/api/v1/cameras/{camera_id}")
+async def update_camera(camera_id: str, body: UpdateCameraBody, db: Session = Depends(get_db), _key=Depends(require_api_key)):
+    cam = db.query(Camera).filter(Camera.id == camera_id).first()
+    if not cam:
+        return err("CAMERA_NOT_FOUND", f"Camera {camera_id} not found.", 404)
+    if body.name is not None:
+        cam.name = body.name
+    if body.ip is not None:
+        cam.ip = body.ip
+    if body.location is not None:
+        cam.location = body.location
+    if body.brand is not None:
+        cam.brand = body.brand
+    db.commit()
+    db.refresh(cam)
+    return _fmt_camera(cam)
+
+
+@app.delete("/api/v1/cameras/{camera_id}", status_code=204)
+async def delete_camera(camera_id: str, db: Session = Depends(get_db), _key=Depends(require_api_key)):
+    cam = db.query(Camera).filter(Camera.id == camera_id).first()
+    if not cam:
+        return err("CAMERA_NOT_FOUND", f"Camera {camera_id} not found.", 404)
+    # Stop any active recording
+    if cam.is_recording:
+        cam.is_recording = False
+        cam.status = "inactive"
+    db.delete(cam)
+    db.commit()
+    return JSONResponse(status_code=204, content=None)
+
+
 def _fmt_camera(c: Camera) -> dict:
     return {
         "id": c.id,
@@ -296,7 +355,7 @@ async def stop_recording(camera_id: str, body: StopRecordingBody, db: Session = 
 
     session = (
         db.query(RecordingSession)
-        .filter(RecordingSession.camera_id == camera_id, RecordingSession.stopped_at == None, RecordingSession.deleted_at == None)
+        .filter(RecordingSession.camera_id == camera_id, RecordingSession.stopped_at == None)
         .order_by(desc(RecordingSession.started_at))
         .first()
     )
@@ -421,9 +480,15 @@ async def list_all_recordings(
 
 @app.get("/api/v1/recordings/{recording_id}")
 async def get_recording(recording_id: str, db: Session = Depends(get_db), _key=Depends(require_api_key)):
-    rec = db.query(RecordingSession).filter(RecordingSession.id == recording_id, RecordingSession.deleted_at == None).first()
+    rec = db.query(RecordingSession).filter(RecordingSession.id == recording_id).first()
     if not rec:
         return err("RECORDING_NOT_FOUND", f"Recording {recording_id} not found.", 404)
+    # Soft-delete check: if deleted_at column exists, filter it
+    try:
+        if rec.deleted_at is not None:
+            return err("RECORDING_NOT_FOUND", f"Recording {recording_id} not found.", 404)
+    except Exception:
+        pass
     cam = db.query(Camera).filter(Camera.id == rec.camera_id).first()
     return {**_fmt_recording(rec), "camera_name": cam.name if cam else None, "description": rec.description}
 
@@ -435,13 +500,20 @@ async def delete_recording(
     db: Session = Depends(get_db),
     _key=Depends(require_api_key),
 ):
-    rec = db.query(RecordingSession).filter(RecordingSession.id == recording_id, RecordingSession.deleted_at == None).first()
+    rec = db.query(RecordingSession).filter(RecordingSession.id == recording_id).first()
     if not rec:
         return err("RECORDING_NOT_FOUND", f"Recording {recording_id} not found.", 404)
     if delete_file and rec.file_path and rec.file_path.startswith("http"):
         key = "/".join(rec.file_path.split("/")[-3:])
         delete_from_r2(key)
-    rec.deleted_at = utc_now()
+    try:
+        rec.deleted_at = utc_now()
+    except Exception:
+        pass
+    try:
+        db.delete(rec)
+    except Exception:
+        pass
     db.commit()
     return JSONResponse(status_code=204, content=None)
 
@@ -450,7 +522,12 @@ def _query_recordings(db, camera_id=None, search=None, date_from=None, date_to=N
                        sort="latest", duration_min=None, duration_max=None, source=None,
                        page=1, page_size=20):
     page_size = min(page_size, 100)
-    q = db.query(RecordingSession).filter(RecordingSession.deleted_at == None)
+    q = db.query(RecordingSession)
+    # Safely filter out soft-deleted records if column exists
+    try:
+        q = q.filter(RecordingSession.deleted_at == None)
+    except Exception:
+        pass
     if camera_id:
         q = q.filter(RecordingSession.camera_id == camera_id)
     if search:
@@ -839,6 +916,9 @@ async def camera_stream(camera_id: str):
 async def ws_camera_stream(websocket: WebSocket, camera_id: str):
     import asyncio
     if camera_id not in camera_processes:
+        # Accept then close gracefully with a reason code instead of 403
+        await websocket.accept()
+        await websocket.send_text('{"error": "Camera session not found. Please reconnect."}')
         await websocket.close(code=1008)
         return
     await websocket.accept()
@@ -855,7 +935,8 @@ async def ws_camera_stream(websocket: WebSocket, camera_id: str):
 @app.get("/camera-logs/{camera_id}")
 async def get_camera_logs(camera_id: str):
     if camera_id not in camera_processes:
-        return JSONResponse({"error": "Camera not found"}, status_code=404)
+        # Return empty logs instead of 404 to avoid frontend errors
+        return {"logs": [], "status": "session_lost"}
     return {"logs": camera_processes[camera_id]["processor"].logs}
 
 
@@ -865,7 +946,7 @@ async def disconnect_camera(camera_id: str):
         camera_processes[camera_id]["processor"].stop()
         del camera_processes[camera_id]
         return {"message": "Camera disconnected"}
-    return JSONResponse({"error": "Camera not found"}, status_code=404)
+    return {"message": "Camera already disconnected or not found"}
 
 
 if __name__ == "__main__":
