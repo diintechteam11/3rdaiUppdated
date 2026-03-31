@@ -375,12 +375,8 @@ async function loadCameras(page=1) {
         </div>
         <div class="flex gap-2 flex-wrap items-center">
           ${c.is_recording
-            ? `<button class="btn-danger" onclick="openStopModal('${c.id}')">
-                <svg class="w-3 h-3 inline mr-1" fill="currentColor" viewBox="0 0 20 20"><rect x="5" y="5" width="10" height="10" rx="1"/></svg>Stop Rec
-               </button>`
-            : `<button class="btn-success" onclick="startRec('${c.id}')">
-                <svg class="w-3 h-3 inline mr-1" fill="currentColor" viewBox="0 0 20 20"><circle cx="10" cy="10" r="6"/></svg>Start Rec
-               </button>`}
+            ? `<button class="btn-danger" onclick="openStopModal('${c.id}')">\n                <svg class="w-3 h-3 inline mr-1" fill="currentColor" viewBox="0 0 20 20"><rect x="5" y="5" width="10" height="10" rx="1"/></svg>Stop Rec\n               </button>`
+            : `<button class="btn-success" onclick="startRec(${JSON.stringify(c)})">\n                <svg class="w-3 h-3 inline mr-1" fill="currentColor" viewBox="0 0 20 20"><circle cx="10" cy="10" r="6"/></svg>Start Rec\n               </button>`}
           <button class="btn-warn" onclick="viewRecStatus('${c.id}')">Status</button>
           <button class="btn-icon btn-icon-edit" onclick="openEditModal(${JSON.stringify(c)})" title="Edit camera">
             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
@@ -414,12 +410,17 @@ async function registerCamera() {
   loadCameras();
 }
 
-async function startRec(cameraId) {
+async function startRec(camera) {
+  // camera can be object or ID string (backward compat)
+  if (typeof camera === 'string') { toast('Reload page and try again.', true); return; }
   const by = prompt('Your name (initiated_by):'); if (!by) return;
   const note = prompt('Optional note (or leave blank):');
-  const data = await api('POST', `/cameras/${cameraId}/recording/start`, { initiated_by: by, note: note||undefined });
+  const data = await api('POST', `/cameras/${camera.id}/recording/start`, { initiated_by: by, note: note||undefined });
   if (!data) return;
-  data.error ? toast(data.message, true) : toast(`✅ Recording started! Session: ${data.session_id}`);
+  if (data.error) { toast(data.message, true); return; }
+  toast(`✅ Recording started!`);
+  // Auto-connect camera for live stream preview
+  startLiveStream(camera);
   loadCameras();
 }
 
@@ -449,6 +450,8 @@ async function submitStopRecording() {
   if (!data) return;
   data.error ? toast(data.message, true) : toast(`✅ Recording saved! Duration: ${data.duration_secs}s`);
   document.getElementById('stopRecModal').classList.add('hidden');
+  // Stop live stream if it's for this camera
+  if (liveState.dbCamId === cameraId) stopLiveStream();
   loadCameras();
 }
 
@@ -480,18 +483,30 @@ async function loadRecordings(page=1) {
   const list = document.getElementById('recordingList');
   list.innerHTML = !data.recordings?.length ? '<p class="text-slate-500 text-sm">No recordings found.</p>' :
     data.recordings.map(r => `
-      <div class="glass rounded-2xl p-4 flex flex-wrap justify-between items-start gap-3">
-        <div>
-          <div class="font-medium text-white mb-1">${r.video_name||'—'}</div>
-          <div class="text-xs text-slate-400 space-y-0.5">
-            <div>ID: <code class="text-indigo-300">${r.id}</code> &nbsp;|&nbsp; Camera: ${r.camera_id}</div>
-            <div>Source: <span class="px-2 py-0.5 rounded bg-indigo-900/50 text-indigo-300">${r.source}</span>
-              &nbsp;|&nbsp; Duration: ${r.duration_secs??'—'}s</div>
-            <div>Started: ${fmtDate(r.started_at)} &nbsp;|&nbsp; Stopped: ${fmtDate(r.stopped_at)}</div>
-            ${r.file_path?`<div><a href="${r.file_path}" target="_blank" class="text-indigo-400 hover:underline text-xs">View file →</a></div>`:''}
+      <div class="glass rounded-2xl p-4" id="rec-${r.id}">
+        <div class="flex flex-wrap justify-between items-start gap-3">
+          <div style="flex:1;min-width:0">
+            <div class="font-medium text-white mb-1 flex items-center gap-2">
+              <svg class="w-4 h-4 text-indigo-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+              ${r.video_name||'—'}
+            </div>
+            <div class="text-xs text-slate-400 space-y-0.5">
+              <div>ID: <code class="text-indigo-300">${r.id}</code> &nbsp;|&nbsp; Camera: <code class="text-indigo-300">${r.camera_id}</code></div>
+              <div>Source: <span class="px-2 py-0.5 rounded bg-indigo-900/50 text-indigo-300">${r.source}</span>
+                &nbsp;|&nbsp; Duration: <span class="text-white font-medium">${r.duration_secs??'—'}s</span></div>
+              <div>Started: ${fmtDate(r.started_at)} &nbsp;|&nbsp; Stopped: ${fmtDate(r.stopped_at)}</div>
+            </div>
+          </div>
+          <div class="flex gap-2 flex-wrap items-start">
+            ${r.file_path
+              ? `<button class="btn-primary text-xs" onclick="openVideoModal('${r.file_path}', '${(r.video_name||'Recording').replace(/'/g,'\\'')}')">
+                  <svg class="w-3 h-3 inline mr-1" fill="currentColor" viewBox="0 0 20 20"><path d="M6.3 2.841A1.5 1.5 0 004 4.11V15.89a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z"/></svg>
+                  ▶ Play
+                 </button>`
+              : '<span class="text-[10px] text-slate-600 italic">No file recorded</span>'}
+            <button class="btn-danger text-xs" onclick="deleteRec('${r.id}')">Delete</button>
           </div>
         </div>
-        <button class="btn-danger text-xs" onclick="deleteRec('${r.id}')">Delete</button>
       </div>`).join('');
 
   const totalPages = Math.ceil(data.total/10);
@@ -623,14 +638,26 @@ async function loadAnalysisSessions() {
       const label = typeLabels[s.analysis_type] || s.analysis_type;
       return `
       <div class="glass rounded-2xl p-4">
-        <div class="flex justify-between items-start mb-2">
+        <div class="flex justify-between items-start mb-2 flex-wrap gap-2">
           <span class="font-medium text-white px-2 py-1 rounded-lg bg-${col}-500/10 text-${col}-300 text-sm">${label}</span>
           <code class="text-indigo-300 text-xs">${s.id}</code>
         </div>
-        <div class="text-xs text-slate-400 space-y-0.5">
+        <div class="text-xs text-slate-400 space-y-0.5 mb-3">
           <div>Started: ${fmtDate(s.capture_started_at)} &nbsp;|&nbsp; Ended: ${s.capture_ended_at ? fmtDate(s.capture_ended_at) : '<span class="text-amber-400 animate-pulse">● Running</span>'}</div>
           <div>Triggered by: <span class="text-slate-300">${s.triggered_by}</span> &nbsp;|&nbsp; Stopped by: ${s.stopped_by||'—'}</div>
           ${s.analysis_result?`<div class="mt-1 p-2 rounded-lg bg-white/5 text-slate-300">Result: ${s.analysis_result}</div>`:''}
+        </div>
+        <div class="flex gap-2 flex-wrap">
+          <button class="btn-primary text-xs px-3 py-1" onclick="loadDetectionFeed('${s.camera_id}', '${label}')">
+            <svg class="w-3 h-3 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+            📊 View Detection Feed
+          </button>
+          ${s.recording_session_id
+            ? `<button class="btn-warn text-xs px-3 py-1" onclick="loadRecordingForSession('${s.recording_session_id}')">
+                <svg class="w-3 h-3 inline mr-1" fill="currentColor" viewBox="0 0 20 20"><path d="M6.3 2.841A1.5 1.5 0 004 4.11V15.89a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z"/></svg>
+                ▶ View Recording
+               </button>`
+            : ''}
         </div>
       </div>`;
     }).join('');
@@ -640,6 +667,213 @@ async function loadAnalysisSessions() {
 function fmtDate(iso) {
   if (!iso) return '—';
   return new Date(iso).toLocaleString('en-IN', { dateStyle:'medium', timeStyle:'short' });
+}
+
+// ═══════════════════════════════════════════════════════════
+// LIVE RECORDING STREAM
+// ═══════════════════════════════════════════════════════════
+const liveState = { dbCamId: null, streamId: null, ws: null, timer: null, startTime: null, expanded: false };
+
+async function startLiveStream(camera) {
+  // If already streaming for this camera, skip
+  if (liveState.dbCamId === camera.id) return;
+  // Disconnect any existing stream first
+  await stopLiveStream(false);
+
+  liveState.dbCamId = camera.id;
+  document.getElementById('lrCamName').textContent = camera.name;
+  document.getElementById('lrStatus').textContent = 'Connecting…';
+  document.getElementById('liveDrawer').classList.remove('hidden');
+
+  // Start timer
+  liveState.startTime = Date.now();
+  liveState.timer = setInterval(() => {
+    const s = Math.floor((Date.now() - liveState.startTime) / 1000);
+    document.getElementById('lrTimer').textContent =
+      String(Math.floor(s/60)).padStart(2,'0') + ':' + String(s%60).padStart(2,'0');
+  }, 1000);
+
+  // Connect camera for streaming (no triggers = stream only mode)
+  try {
+    const fd = new FormData();
+    fd.append('name', camera.name + '_live');
+    fd.append('link', camera.ip);
+    fd.append('triggers', ''); // stream-only, no AI processing
+    const res = await fetch('/connect-camera', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!data.camera_id) { document.getElementById('lrStatus').textContent = 'Stream connect failed'; return; }
+    liveState.streamId = data.camera_id;
+    // Poll until connected then open WebSocket
+    pollConnectAndStream(data.camera_id);
+  } catch(e) {
+    document.getElementById('lrStatus').textContent = 'Error: ' + e.message;
+  }
+}
+
+async function pollConnectAndStream(streamId, attempt=0) {
+  if (attempt > 15) { document.getElementById('lrStatus').textContent = 'Connection timed out'; return; }
+  try {
+    const res = await fetch('/camera-status/' + streamId);
+    const d = await res.json();
+    if (d.status === 'connected') {
+      document.getElementById('lrStatus').textContent = '● Live';
+      document.getElementById('lrStatus').style.color = '#34d399';
+      openDrawerWS(streamId);
+    } else if (d.status === 'failed') {
+      document.getElementById('lrStatus').textContent = 'Camera connection failed';
+      document.getElementById('lrStatus').style.color = '#f87171';
+    } else {
+      setTimeout(() => pollConnectAndStream(streamId, attempt+1), 2000);
+    }
+  } catch(e) { setTimeout(() => pollConnectAndStream(streamId, attempt+1), 2000); }
+}
+
+function openDrawerWS(streamId) {
+  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const ws = new WebSocket(`${protocol}//${location.host}/ws-camera/${streamId}`);
+  ws.binaryType = 'arraybuffer';
+  const canvas = document.getElementById('lrCanvas');
+  const ctx = canvas.getContext('2d');
+  const img = new Image();
+  ws.onmessage = e => {
+    const blob = new Blob([e.data], { type: 'image/jpeg' });
+    const url = URL.createObjectURL(blob);
+    img.onload = () => { canvas.width = img.width; canvas.height = img.height; ctx.drawImage(img,0,0); URL.revokeObjectURL(url); };
+    img.src = url;
+  };
+  ws.onclose = () => { if (liveState.streamId === streamId && liveState.dbCamId) setTimeout(() => openDrawerWS(streamId), 2000); };
+  liveState.ws = ws;
+}
+
+function toggleDrawerExpand() {
+  liveState.expanded = !liveState.expanded;
+  document.getElementById('lrVideoArea').style.display = liveState.expanded ? 'block' : 'none';
+  document.getElementById('lrExpandBtn').textContent = liveState.expanded ? '▼ Collapse' : '▲ Expand';
+}
+
+async function stopLiveStream(showToast=true) {
+  if (!liveState.streamId) { liveState.dbCamId = null; return; }
+  if (liveState.ws) { liveState.ws.close(); liveState.ws = null; }
+  if (liveState.timer) { clearInterval(liveState.timer); liveState.timer = null; }
+  try { await fetch('/disconnect-camera/' + liveState.streamId, { method: 'POST' }); } catch(e) {}
+  liveState.streamId = null;
+  liveState.dbCamId = null;
+  liveState.expanded = false;
+  document.getElementById('liveDrawer').classList.add('hidden');
+  document.getElementById('lrVideoArea').style.display = 'none';
+  document.getElementById('lrExpandBtn').textContent = '▲ Expand';
+  if (showToast) toast('Live stream stopped.');
+}
+
+function openStopModalFromDrawer() {
+  if (!liveState.dbCamId) return;
+  openStopModal(liveState.dbCamId);
+}
+
+// ═══════════════════════════════════════════════════════════
+// VIDEO PLAYER MODAL
+// ═══════════════════════════════════════════════════════════
+function openVideoModal(filePath, title='Recording') {
+  document.getElementById('videoModalTitle').textContent = title;
+  const video = document.getElementById('videoPlayer');
+  const errDiv = document.getElementById('videoError');
+  video.classList.remove('hidden');
+  errDiv.classList.add('hidden');
+  video.src = filePath + '?t=' + Date.now();
+  video.onerror = () => {
+    video.classList.add('hidden');
+    errDiv.classList.remove('hidden');
+  };
+  document.getElementById('videoModal').classList.remove('hidden');
+}
+function closeVideoModal(event) {
+  if (!event || event.target === document.getElementById('videoModal')) {
+    const video = document.getElementById('videoPlayer');
+    video.pause(); video.src = '';
+    document.getElementById('videoModal').classList.add('hidden');
+  }
+}
+
+async function loadRecordingForSession(recordingSessionId) {
+  const k = getKey(); if (!k) return;
+  const res = await fetch(`/api/v1/recordings/${recordingSessionId}`, { headers: {'X-API-Key': k} });
+  if (!res.ok) { toast('Recording not found', true); return; }
+  const r = await res.json();
+  if (r.error) { toast(r.message, true); return; }
+  if (!r.file_path) { toast('No video file saved for this session.', true); return; }
+  openVideoModal(r.file_path, r.video_name || 'Recording');
+}
+
+// ═══════════════════════════════════════════════════════════
+// DETECTION FEED MODAL
+// ═══════════════════════════════════════════════════════════
+let _allDetections = [];
+
+async function loadDetectionFeed(cameraId, sessionLabel='') {
+  document.getElementById('feedModalTitle').textContent = `Detection Feed — ${sessionLabel||cameraId}`;
+  document.getElementById('feedModalCount').textContent = 'Loading…';
+  document.getElementById('feedGrid').innerHTML = '<div style="text-align:center;padding:40px;color:#64748b;">Loading detections…</div>';
+  document.getElementById('feedModal').classList.remove('hidden');
+
+  const k = getKey(); if (!k) return;
+  try {
+    const res = await fetch(`/api/v1/cameras/${cameraId}/detections?page_size=100`, { headers: {'X-API-Key': k} });
+    const data = await res.json();
+    _allDetections = data.detections || [];
+    document.getElementById('feedModalCount').textContent = `${_allDetections.length} of ${data.total} detections`;
+    filterFeedGrid();
+  } catch(e) {
+    document.getElementById('feedGrid').innerHTML = `<div style="text-align:center;padding:40px;color:#f87171;">Error loading detections: ${e.message}</div>`;
+  }
+}
+
+function filterFeedGrid() {
+  const filter = document.getElementById('feedTriggerFilter').value;
+  const list = filter ? _allDetections.filter(d => d.trigger === filter) : _allDetections;
+  const grid = document.getElementById('feedGrid');
+
+  if (!list.length) {
+    grid.innerHTML = '<div style="text-align:center;padding:40px;color:#64748b;">No detections found.</div>';
+    return;
+  }
+
+  const triggerColors = {
+    'Number Plate Detection': '#818cf8',
+    'Helmet Detection': '#f87171',
+    'Seatbelt Detection': '#fbbf24',
+    'Triple Riding Detection': '#fb923c'
+  };
+
+  grid.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px;padding:4px 0;">
+    ${list.map(d => {
+      const plateImg = d.image_plate_url
+        ? `<img src="${d.image_plate_url}" style="width:100%;border-radius:6px;object-fit:cover;max-height:90px;cursor:pointer;" onclick="openImgPreview('${d.image_plate_url}')" title="Plate crop">`
+        : '';
+      const objImg = d.image_object_url
+        ? `<img src="${d.image_object_url}" style="width:100%;border-radius:6px;object-fit:cover;max-height:90px;cursor:pointer;margin-top:4px;" onclick="openImgPreview('${d.image_object_url}')" title="Object crop">`
+        : '';
+      const col = triggerColors[d.trigger] || '#94a3b8';
+      return `<div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:12px;padding:12px;">
+        <div style="font-size:10px;font-weight:700;color:${col};margin-bottom:6px;text-transform:uppercase;letter-spacing:.06em;">${d.trigger}</div>
+        ${plateImg}${objImg}
+        ${d.plate_number ? `<div style="margin-top:6px;font-size:15px;font-weight:700;color:#a5b4fc;">${d.plate_number}</div>` : ''}
+        ${d.vehicle_color ? `<div style="font-size:11px;color:#94a3b8;">${d.vehicle_color}</div>` : ''}
+        <div style="font-size:10px;color:#475569;margin-top:4px;">${d.created_at ? new Date(d.created_at).toLocaleTimeString() : ''}</div>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
+function openImgPreview(src) {
+  const w = window.open();
+  w.document.write(`<style>body{margin:0;background:#000;display:flex;align-items:center;justify-content:center;min-height:100vh;}</style><img src="${src}" style="max-width:100%;max-height:100vh;">`);
+}
+
+function closeFeedModal(event) {
+  if (!event || event.target === document.getElementById('feedModal')) {
+    document.getElementById('feedModal').classList.add('hidden');
+    _allDetections = [];
+  }
 }
 
 // ── Edit Camera Modal ────────────────────────────────────────
@@ -713,5 +947,69 @@ window.addEventListener('DOMContentLoaded', () => {
   document.getElementById('an-type').dispatchEvent(ev);
 });
 </script>
+
+<!-- ═══ LIVE RECORDING DRAWER ═════════════════════════════════════════ -->
+<div id="liveDrawer" class="hidden" style="position:fixed;bottom:0;left:0;right:0;z-index:900;background:rgba(2,6,23,0.97);border-top:1px solid rgba(129,140,248,0.3);backdrop-filter:blur(16px);">
+  <div style="max-width:1100px;margin:0 auto;padding:12px 20px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <span style="width:10px;height:10px;background:#ef4444;border-radius:50%;display:inline-block;animation:pulse 1s infinite;"></span>
+        <span style="color:#f1f5f9;font-weight:600;">LIVE RECORDING</span>
+        <span id="lrCamName" style="color:#818cf8;font-size:13px;"></span>
+        <span id="lrTimer" style="color:#94a3b8;font-family:monospace;font-size:13px;">00:00</span>
+        <span id="lrStatus" style="color:#fbbf24;font-size:11px;">Connecting…</span>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button onclick="toggleDrawerExpand()" style="background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.15);color:#94a3b8;border-radius:8px;padding:4px 12px;cursor:pointer;font-size:12px;" id="lrExpandBtn">▲ Expand</button>
+        <button onclick="openStopModalFromDrawer()" style="background:#dc2626;color:white;border:none;border-radius:8px;padding:4px 14px;cursor:pointer;font-size:12px;">■ Stop Recording</button>
+      </div>
+    </div>
+    <div id="lrVideoArea" style="display:none;">
+      <canvas id="lrCanvas" style="width:100%;max-height:300px;background:#000;border-radius:10px;display:block;"></canvas>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ VIDEO PLAYER MODAL ══════════════════════════════════════════════ -->
+<div id="videoModal" class="hidden modal-overlay" onclick="closeVideoModal(event)">
+  <div onclick="event.stopPropagation()" style="background:#0a0f1e;border:1px solid rgba(255,255,255,0.12);border-radius:20px;padding:20px;width:90%;max-width:900px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <span id="videoModalTitle" style="color:#e2e8f0;font-weight:600;">Recording</span>
+      <button onclick="closeVideoModal()" style="background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.12);color:#94a3b8;border-radius:8px;padding:5px 14px;cursor:pointer;">✕ Close</button>
+    </div>
+    <video id="videoPlayer" controls style="width:100%;border-radius:12px;background:#000;max-height:70vh;">
+      Your browser does not support the video tag.
+    </video>
+    <div id="videoError" class="hidden" style="text-align:center;padding:40px;color:#94a3b8;">
+      <div style="font-size:40px;margin-bottom:12px;">⚠️</div>
+      <div style="font-weight:600;color:#f1f5f9;margin-bottom:6px;">Video file not found</div>
+      <div style="font-size:13px;">The recording file may have been deleted or not saved correctly.<br>Ensure the camera was connected via the AI Analytics page when recording started.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ DETECTION FEED MODAL ════════════════════════════════════════════ -->
+<div id="feedModal" class="hidden modal-overlay" onclick="closeFeedModal(event)">
+  <div onclick="event.stopPropagation()" style="background:#0a0f1e;border:1px solid rgba(255,255,255,0.12);border-radius:20px;padding:24px;width:95%;max-width:1000px;max-height:92vh;display:flex;flex-direction:column;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-shrink:0;">
+      <div>
+        <span id="feedModalTitle" style="color:#e2e8f0;font-weight:600;font-size:16px;">Detection Feed</span>
+        <span id="feedModalCount" style="color:#64748b;font-size:12px;margin-left:10px;"></span>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <select id="feedTriggerFilter" onchange="filterFeedGrid()" style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);color:#e2e8f0;border-radius:8px;padding:5px 10px;font-size:12px;">
+          <option value="">All Types</option>
+          <option value="Number Plate Detection">Number Plate</option>
+          <option value="Helmet Detection">Helmet</option>
+          <option value="Seatbelt Detection">Seatbelt</option>
+          <option value="Triple Riding Detection">Triple Riding</option>
+        </select>
+        <button onclick="closeFeedModal()" style="background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.12);color:#94a3b8;border-radius:8px;padding:5px 14px;cursor:pointer;">✕ Close</button>
+      </div>
+    </div>
+    <div id="feedGrid" style="overflow-y:auto;flex:1;"></div>
+  </div>
+</div>
+
 </body>
 </html>

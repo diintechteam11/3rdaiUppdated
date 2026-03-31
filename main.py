@@ -565,6 +565,70 @@ def _fmt_recording(r: RecordingSession) -> dict:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# DETECTIONS  /api/v1/detections  &  /api/v1/cameras/{id}/detections
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _fmt_detection(d: Detection) -> dict:
+    return {
+        "id": str(d.id),
+        "task_id": d.task_id,
+        "filename": d.filename,
+        "timestamp": d.timestamp,
+        "trigger": d.trigger,
+        "event": d.event,
+        "image_plate_url": d.image_plate_url,
+        "image_object_url": d.image_object_url,
+        "plate_number": d.plate_number,
+        "vehicle_color": d.vehicle_color,
+        "created_at": iso(d.created_at),
+    }
+
+
+@app.get("/api/v1/cameras/{camera_id}/detections")
+async def camera_detections(
+    camera_id: str,
+    trigger: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 50,
+    db: Session = Depends(get_db),
+    _key=Depends(require_api_key),
+):
+    """Return detections whose task_id matches the camera_id."""
+    page_size = min(page_size, 200)
+    q = db.query(Detection).filter(Detection.task_id == camera_id)
+    if trigger:
+        q = q.filter(Detection.trigger == trigger)
+    q = q.order_by(desc(Detection.created_at))
+    total = q.count()
+    items = q.offset((page - 1) * page_size).limit(page_size).all()
+    return {"detections": [_fmt_detection(d) for d in items], "total": total, "page": page, "page_size": page_size}
+
+
+@app.get("/api/v1/detections")
+async def list_detections(
+    camera_id: Optional[str] = None,
+    task_id: Optional[str] = None,
+    trigger: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 50,
+    db: Session = Depends(get_db),
+    _key=Depends(require_api_key),
+):
+    page_size = min(page_size, 200)
+    q = db.query(Detection)
+    if camera_id:
+        q = q.filter(Detection.task_id == camera_id)
+    if task_id:
+        q = q.filter(Detection.task_id == task_id)
+    if trigger:
+        q = q.filter(Detection.trigger == trigger)
+    q = q.order_by(desc(Detection.created_at))
+    total = q.count()
+    items = q.offset((page - 1) * page_size).limit(page_size).all()
+    return {"detections": [_fmt_detection(d) for d in items], "total": total, "page": page, "page_size": page_size}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # SCHEDULING  /api/v1/cameras/{id}/schedule
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -884,11 +948,10 @@ async def get_logs(task_id: str):
 async def connect_camera(name: str = Form(...), link: str = Form(...), triggers: str = Form("")):
     camera_id = f"cam-{uuid.uuid4().hex[:8]}"
     selected_triggers = [t.strip() for t in triggers.split(",") if t.strip()]
-    if not selected_triggers:
-        return JSONResponse({"error": "No triggers selected"}, status_code=400)
+    # Allow empty triggers for stream-only mode (no AI, just frame streaming)
     processor = LiveCameraProcessor(camera_id, link, selected_triggers)
     camera_processes[camera_id] = {"id": camera_id, "name": name, "link": link, "triggers": selected_triggers, "processor": processor}
-    return {"message": "Camera connection initiated", "camera_id": camera_id}
+    return {"message": "Camera connection initiated", "camera_id": camera_id, "stream_only": len(selected_triggers) == 0}
 
 
 @app.get("/camera-status/{camera_id}")
