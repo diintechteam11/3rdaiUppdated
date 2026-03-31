@@ -109,7 +109,7 @@ class Detection(Base):
     id = Column(Integer, primary_key=True, index=True)
     task_id = Column(String)
     filename = Column(String)
-    timestamp = Column(Float)
+    timestamp = Column(String)
     trigger = Column(String)
     event = Column(Text)
     image_plate_url = Column(String)

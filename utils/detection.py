@@ -473,14 +473,24 @@ class LiveCameraProcessor:
 
                 self._update_latest_frame(frame)
                 
-                # Write to recording if active
-                if self.is_recording and self.video_writer:
-                    self.video_writer.write(frame)
-                    
             except Exception as e:
                 print(f"[DEBUG] Error in processing loop: {e}")
                 time.sleep(0.1)
 
+            # --- RECORDING LOGIC (CONSOLIDATED) ---
+            if self.is_recording and self.latest_frame is not None:
+                if self.video_writer is None:
+                    try:
+                        h, w = self.latest_frame.shape[:2]
+                        raw_path = self.recording_file_path.replace(".mp4", "_raw.mp4")
+                        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                        self.video_writer = cv2.VideoWriter(raw_path, fourcc, 20, (w, h))
+                        print(f"DEBUG: Opened VideoWriter at {w}x{h} for {raw_path}")
+                    except Exception as ve:
+                        print(f"Error opening VideoWriter: {ve}")
+                
+                if self.video_writer:
+                    self.video_writer.write(self.latest_frame)
     def start_recording(self, file_path, initiated_by="System", note=None, source="manual", analysis_session_id=None):
         if self.is_recording:
             return False, "Already recording"
@@ -494,16 +504,8 @@ class LiveCameraProcessor:
             self.recording_file_path = file_path
             os.makedirs(os.path.dirname(self.recording_file_path), exist_ok=True)
             
-            # Initialize VideoWriter (we'll start writing in the processor loop)
-            # Default to 640x480 if no frame yet, will update on next frame
-            w, h = 640, 480
-            if self.latest_frame is not None:
-                h, w = self.latest_frame.shape[:2]
-            
             # Use temporary raw path (MPEG-4) for real-time capture
-            raw_path = self.recording_file_path.replace(".mp4", "_raw.mp4")
-            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-            self.video_writer = cv2.VideoWriter(raw_path, fourcc, 20, (w, h))
+            self.video_writer = None # Will be opened on next frame in the processor loop with correct size
             
             self.is_recording = True
             self.recording_start_time = time.time()

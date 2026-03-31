@@ -285,7 +285,7 @@ async def delete_camera(camera_id: str, db: Session = Depends(get_db), _key=Depe
         cam.status = "inactive"
     db.delete(cam)
     db.commit()
-    return JSONResponse(status_code=204, content=None)
+    return Response(status_code=204)
 
 
 def _fmt_camera(c: Camera) -> dict:
@@ -691,7 +691,7 @@ async def delete_schedule(camera_id: str, db: Session = Depends(get_db), _key=De
         return err("SCHEDULE_NOT_FOUND", f"No schedule found for camera {camera_id}.", 404)
     db.delete(sched)
     db.commit()
-    return JSONResponse(status_code=204, content=None)
+    return Response(status_code=204)
 
 
 @app.get("/api/v1/schedules")
