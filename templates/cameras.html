@@ -323,7 +323,9 @@ function toast(msg, err=false) {
 }
 
 // ── Tabs ────────────────────────────────────────────────────
+let activeTab = 'cameras';
 function openTab(name) {
+  activeTab = name;
   ['cameras','recordings','schedules','analysis'].forEach(t => {
     document.getElementById('pane-'+t).classList.add('hidden');
     document.getElementById('tab-'+t)?.classList.remove('tab-active');
@@ -453,6 +455,8 @@ async function submitStopRecording() {
   // Stop live stream if it's for this camera
   if (liveState.dbCamId === cameraId) stopLiveStream();
   loadCameras();
+  if (activeTab === 'recordings') loadRecordings();
+  if (activeTab === 'analysis') loadAnalysisSessions();
 }
 
 async function stopRec(cameraId) {
@@ -699,6 +703,7 @@ async function startLiveStream(camera) {
     fd.append('name', camera.name + '_live');
     fd.append('link', camera.ip);
     fd.append('triggers', ''); // stream-only, no AI processing
+    fd.append('db_id', camera.id); // Important: Link to DB ID so recording start/stop works
     const res = await fetch('/connect-camera', { method: 'POST', body: fd });
     const data = await res.json();
     if (!data.camera_id) { document.getElementById('lrStatus').textContent = 'Stream connect failed'; return; }

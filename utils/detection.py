@@ -481,7 +481,7 @@ class LiveCameraProcessor:
                 print(f"[DEBUG] Error in processing loop: {e}")
                 time.sleep(0.1)
 
-    def start_recording(self, initiated_by="System", note=None, source="manual", analysis_session_id=None):
+    def start_recording(self, file_path, initiated_by="System", note=None, source="manual", analysis_session_id=None):
         if self.is_recording:
             return False, "Already recording"
         
@@ -490,46 +490,20 @@ class LiveCameraProcessor:
             self.analysis_session_id = analysis_session_id
             self.recording_session_id = str(uuid.uuid4())
             
-            # Setup output path
-            now = datetime.now()
-            timestamp_str = now.strftime("%Y%m%d_%H%M%S")
-            safe_name = re.sub(r'[^a-zA-Z0-9]', '_', self.camera_id)
-            filename = f"{safe_name}_{timestamp_str}.mp4"
-            
-            output_dir = os.path.join("static", "recordings", self.camera_id)
-            os.makedirs(output_dir, exist_ok=True)
-            self.recording_file_path = os.path.join(output_dir, filename)
-            
-            # Create DB record
-            db = SessionLocal()
-            new_session = RecordingSession(
-                id=self.recording_session_id,
-                camera_id=self.camera_id,
-                video_name=filename,
-                file_path=f"/static/recordings/{self.camera_id}/{filename}",
-                source=source,
-                initiated_by=initiated_by,
-                description=note,
-                started_at=func.now()
-            )
-            db.add(new_session)
-            
-            # If it's an analysis session, update it
-            if analysis_session_id:
-                analysis = db.query(AnalysisSession).filter(AnalysisSession.id == analysis_session_id).first()
-                if analysis:
-                    analysis.recording_session_id = self.recording_session_id
-                    analysis.capture_started_at = func.now()
-            
-            db.commit()
-            db.close()
+            # Use provided path
+            self.recording_file_path = file_path
+            os.makedirs(os.path.dirname(self.recording_file_path), exist_ok=True)
             
             # Initialize VideoWriter (we'll start writing in the processor loop)
-            # We need width and height from first frame or cap
+            # Default to 640x480 if no frame yet, will update on next frame
+            w, h = 640, 480
             if self.latest_frame is not None:
                 h, w = self.latest_frame.shape[:2]
-                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-                self.video_writer = cv2.VideoWriter(self.recording_file_path, fourcc, 20, (w, h))
+            
+            # Use temporary raw path (MPEG-4) for real-time capture
+            raw_path = self.recording_file_path.replace(".mp4", "_raw.mp4")
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            self.video_writer = cv2.VideoWriter(raw_path, fourcc, 20, (w, h))
             
             self.is_recording = True
             self.recording_start_time = time.time()
@@ -545,29 +519,25 @@ class LiveCameraProcessor:
         
         try:
             self.is_recording = False
+            raw_path = self.recording_file_path.replace(".mp4", "_raw.mp4")
+            out_path = self.recording_file_path
+            
             if self.video_writer:
                 self.video_writer.release()
                 self.video_writer = None
             
             duration = int(time.time() - self.recording_start_time) if self.recording_start_time else 0
             
-            db = SessionLocal()
-            session = db.query(RecordingSession).filter(RecordingSession.id == self.recording_session_id).first()
-            if session:
-                session.stopped_at = func.now()
-                session.duration_secs = duration
-                session.stopped_by = stopped_by
-            
-            # If it was an analysis session
-            if self.analysis_session_id:
-                analysis = db.query(AnalysisSession).filter(AnalysisSession.id == self.analysis_session_id).first()
-                if analysis:
-                    analysis.capture_ended_at = func.now()
-                    analysis.stopped_by = stopped_by
+            # Transcode to H.264 for browser playback once recording is done
+            if os.path.exists(raw_path):
+                try:
+                    subprocess.run(['ffmpeg', '-y', '-i', raw_path, '-c:v', 'libx264', '-crf', '28', '-preset', 'ultrafast', '-movflags', '+faststart', '-pix_fmt', 'yuv420p', out_path], check=True, timeout=30, capture_output=True)
+                    if os.path.exists(raw_path): os.remove(raw_path)
+                    print(f"DEBUG: Video saved and transcoded to {out_path}")
+                except Exception as fe:
+                    print(f"FFmpeg transcode FAILED: {fe}")
+                    if not os.path.exists(out_path): os.rename(raw_path, out_path)
 
-            db.commit()
-            db.close()
-            
             self.add_log("Recording", f"Stopped recording. Duration: {duration}s", r2=False)
             return True, self.recording_session_id
         except Exception as e:

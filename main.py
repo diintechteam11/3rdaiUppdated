@@ -317,6 +317,9 @@ async def start_recording(camera_id: str, body: StartRecordingBody, db: Session 
     session_id = str(uuid.uuid4())
     now = utc_now()
 
+    auto_name = _auto_filename(cam.name)
+    file_path = f"/static/recordings/{camera_id}/{auto_name}"
+
     session = RecordingSession(
         id=session_id,
         camera_id=camera_id,
@@ -324,6 +327,8 @@ async def start_recording(camera_id: str, body: StartRecordingBody, db: Session 
         initiated_by=body.initiated_by,
         description=body.note,
         started_at=now,
+        video_name=auto_name,
+        file_path=file_path
     )
     db.add(session)
     cam.is_recording = True
@@ -332,8 +337,10 @@ async def start_recording(camera_id: str, body: StartRecordingBody, db: Session 
 
     # Also kick off live processor if camera is in camera_processes
     if camera_id in camera_processes:
+        auto_name = _auto_filename(cam.name)
+        recording_path = str(RECORDINGS_DIR / camera_id / auto_name)
         camera_processes[camera_id]["processor"].start_recording(
-            initiated_by=body.initiated_by, note=body.note, source="manual"
+            file_path=recording_path, initiated_by=body.initiated_by, note=body.note, source="manual"
         )
 
     return {
@@ -365,11 +372,19 @@ async def stop_recording(camera_id: str, body: StopRecordingBody, db: Session = 
     now = utc_now()
     duration = int((now - session.started_at.replace(tzinfo=timezone.utc)).total_seconds()) if session.started_at else 0
 
-    auto_name = _auto_filename(cam.name)
+    # Retrieve the path saved at START
+    stored_path = session.file_path.split("/")[-1] if session.file_path else None
+    auto_name = stored_path or _auto_filename(cam.name)
     video_name = body.name or auto_name
 
     r2_path = None
     local_path = RECORDINGS_DIR / camera_id / auto_name
+    
+    # Give it a small delay for processor to finish transcoding if possible
+    # In a production app, R2 upload should be done in BackgroundTasks
+    if not local_path.exists():
+        time.sleep(1) # Wait for ffmpeg to finish its 1-second burst if it's ultrafast
+
     if local_path.exists():
         try:
             key = build_r2_key(cam.name, video_name)
@@ -382,7 +397,8 @@ async def stop_recording(camera_id: str, body: StopRecordingBody, db: Session = 
     session.duration_secs = duration
     session.stopped_by = body.stopped_by
     session.video_name = video_name
-    session.file_path = r2_path or f"/static/recordings/{camera_id}/{auto_name}"
+    if r2_path:
+        session.file_path = r2_path
     if body.description:
         session.description = body.description
 
@@ -744,6 +760,9 @@ async def analysis_start(camera_id: str, body: AnalysisStartBody, db: Session = 
     )
     db.add(analysis)
 
+    auto_name = _auto_filename(cam.name)
+    file_path = f"/static/recordings/{camera_id}/{auto_name}"
+
     # Create linked recording session
     rec = RecordingSession(
         id=session_id,
@@ -751,6 +770,8 @@ async def analysis_start(camera_id: str, body: AnalysisStartBody, db: Session = 
         source="analysis",
         initiated_by=body.triggered_by,
         started_at=now,
+        video_name=auto_name,
+        file_path=file_path
     )
     db.add(rec)
     db.flush()
@@ -760,8 +781,10 @@ async def analysis_start(camera_id: str, body: AnalysisStartBody, db: Session = 
     db.commit()
 
     if camera_id in camera_processes:
+        auto_name = _auto_filename(cam.name)
+        recording_path = str(RECORDINGS_DIR / camera_id / auto_name)
         camera_processes[camera_id]["processor"].start_recording(
-            initiated_by=body.triggered_by, source="analysis", analysis_session_id=analysis_id
+            file_path=recording_path, initiated_by=body.triggered_by, source="analysis", analysis_session_id=analysis_id
         )
 
     return {
@@ -945,10 +968,15 @@ async def get_logs(task_id: str):
 
 
 @app.post("/connect-camera")
-async def connect_camera(name: str = Form(...), link: str = Form(...), triggers: str = Form("")):
-    camera_id = f"cam-{uuid.uuid4().hex[:8]}"
+async def connect_camera(name: str = Form(...), link: str = Form(...), triggers: str = Form(""), db_id: Optional[str] = Form(None)):
+    camera_id = db_id or f"cam-{uuid.uuid4().hex[:8]}"
     selected_triggers = [t.strip() for t in triggers.split(",") if t.strip()]
-    # Allow empty triggers for stream-only mode (no AI, just frame streaming)
+    # If already connected, reuse processor but update triggers
+    if camera_id in camera_processes:
+        proc = camera_processes[camera_id]["processor"]
+        proc.selected_triggers = selected_triggers
+        return {"message": "Camera already connected, updated triggers", "camera_id": camera_id, "stream_only": len(selected_triggers) == 0}
+    
     processor = LiveCameraProcessor(camera_id, link, selected_triggers)
     camera_processes[camera_id] = {"id": camera_id, "name": name, "link": link, "triggers": selected_triggers, "processor": processor}
     return {"message": "Camera connection initiated", "camera_id": camera_id, "stream_only": len(selected_triggers) == 0}
