@@ -452,8 +452,7 @@ async function submitStopRecording() {
   if (!data) return;
   data.error ? toast(data.message, true) : toast(`✅ Recording saved! Duration: ${data.duration_secs}s`);
   document.getElementById('stopRecModal').classList.add('hidden');
-  // Stop live stream if it's for this camera
-  if (liveState.dbCamId === cameraId) stopLiveStream();
+  // Load updated data
   loadCameras();
   if (activeTab === 'recordings') loadRecordings();
   if (activeTab === 'analysis') loadAnalysisSessions();
@@ -778,16 +777,25 @@ function openStopModalFromDrawer() {
 // ═══════════════════════════════════════════════════════════
 // VIDEO PLAYER MODAL
 // ═══════════════════════════════════════════════════════════
-function openVideoModal(filePath, title='Recording') {
+function openVideoModal(filePath, title='Recording', retryCount=0) {
   document.getElementById('videoModalTitle').textContent = title;
   const video = document.getElementById('videoPlayer');
   const errDiv = document.getElementById('videoError');
   video.classList.remove('hidden');
   errDiv.classList.add('hidden');
-  video.src = filePath + '?t=' + Date.now();
+  
+  // Use cache-buster and retry if needed
+  const finalPath = filePath + (filePath.includes('?') ? '&' : '?') + 't=' + Date.now();
+  video.src = finalPath;
+  
   video.onerror = () => {
-    video.classList.add('hidden');
-    errDiv.classList.remove('hidden');
+    if (retryCount < 5) {
+      console.log(`Video 404/error, retrying in 1s... (${retryCount+1}/5)`);
+      setTimeout(() => openVideoModal(filePath, title, retryCount + 1), 1000);
+    } else {
+      video.classList.add('hidden');
+      errDiv.classList.remove('hidden');
+    }
   };
   document.getElementById('videoModal').classList.remove('hidden');
 }
@@ -795,6 +803,8 @@ function closeVideoModal(event) {
   if (!event || event.target === document.getElementById('videoModal')) {
     const video = document.getElementById('videoPlayer');
     video.pause(); video.src = '';
+    // Clear error handler
+    video.onerror = null;
     document.getElementById('videoModal').classList.add('hidden');
   }
 }

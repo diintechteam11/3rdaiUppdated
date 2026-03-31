@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, BackgroundTasks, Request, Form, WebSocket, WebSocketDisconnect, Depends, Header, HTTPException, Query
+from fastapi import FastAPI, UploadFile, File, BackgroundTasks, Request, Form, WebSocket, WebSocketDisconnect, Depends, Header, HTTPException, Query, Response
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -531,7 +531,7 @@ async def delete_recording(
     except Exception:
         pass
     db.commit()
-    return JSONResponse(status_code=204, content=None)
+    return Response(status_code=204)
 
 
 def _query_recordings(db, camera_id=None, search=None, date_from=None, date_to=None,
@@ -600,26 +600,6 @@ def _fmt_detection(d: Detection) -> dict:
     }
 
 
-@app.get("/api/v1/cameras/{camera_id}/detections")
-async def camera_detections(
-    camera_id: str,
-    trigger: Optional[str] = None,
-    page: int = 1,
-    page_size: int = 50,
-    db: Session = Depends(get_db),
-    _key=Depends(require_api_key),
-):
-    """Return detections whose task_id matches the camera_id."""
-    page_size = min(page_size, 200)
-    q = db.query(Detection).filter(Detection.task_id == camera_id)
-    if trigger:
-        q = q.filter(Detection.trigger == trigger)
-    q = q.order_by(desc(Detection.created_at))
-    total = q.count()
-    items = q.offset((page - 1) * page_size).limit(page_size).all()
-    return {"detections": [_fmt_detection(d) for d in items], "total": total, "page": page, "page_size": page_size}
-
-
 @app.get("/api/v1/detections")
 async def list_detections(
     camera_id: Optional[str] = None,
@@ -630,18 +610,32 @@ async def list_detections(
     db: Session = Depends(get_db),
     _key=Depends(require_api_key),
 ):
+    """General detection query endpoint."""
     page_size = min(page_size, 200)
     q = db.query(Detection)
-    if camera_id:
-        q = q.filter(Detection.task_id == camera_id)
-    if task_id:
-        q = q.filter(Detection.task_id == task_id)
+    # Both camera_id and task_id filters map to the task_id column
+    target_id = camera_id or task_id
+    if target_id:
+        q = q.filter(Detection.task_id == target_id)
     if trigger:
         q = q.filter(Detection.trigger == trigger)
     q = q.order_by(desc(Detection.created_at))
     total = q.count()
     items = q.offset((page - 1) * page_size).limit(page_size).all()
     return {"detections": [_fmt_detection(d) for d in items], "total": total, "page": page, "page_size": page_size}
+
+
+@app.get("/api/v1/cameras/{camera_id}/detections")
+async def list_camera_detections(
+    camera_id: str,
+    trigger: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 50,
+    db: Session = Depends(get_db),
+    _key=Depends(require_api_key),
+):
+    """Shorthand for camera-specific detections."""
+    return await list_detections(camera_id=camera_id, trigger=trigger, page=page, page_size=page_size, db=db, _key=_key)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
