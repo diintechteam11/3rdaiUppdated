@@ -460,17 +460,20 @@ class LiveCameraProcessor:
                 # Update visual label with the detected plate number
                 if plate_text:
                     print(f"DEBUG [SUCCESS]: Detected Plate Number -> {plate_text}")
-                    self.active_visuals[unique_track_key]['label'] = f"PLATE: {plate_text}"
+                    if unique_track_key in self.active_visuals:
+                        self.active_visuals[unique_track_key]['label'] = f"PLATE: {plate_text}"
                     # Try to find and update the associated vehicle label as well
                     for v_key in self.active_visuals:
                         if v_key.startswith("Vehicle_"):
                             vx1, vy1, vx2, vy2 = self.active_visuals[v_key]['box']
                             px, py = (x1+x2)/2, (y1+y2)/2
                             if vx1 <= px <= vx2 and vy1 <= py <= vy2:
-                                self.active_visuals[v_key]['label'] = f"Vehicle #{v_key.split('_')[-1]} | {plate_text}"
+                                if v_key in self.active_visuals:
+                                    self.active_visuals[v_key]['label'] = f"Vehicle #{v_key.split('_')[-1]} | {plate_text}"
                 else:
                     print(f"DEBUG [INFO]: Plate detected but OCR returned no text (API Limit or poor quality). Logging as Unreadable.")
-                    self.active_visuals[unique_track_key]['label'] = f"PLATE: [Unreadable]"
+                    if unique_track_key in self.active_visuals:
+                        self.active_visuals[unique_track_key]['label'] = f"PLATE: [Unreadable]"
                 
                 # Find clear vehicle crop
                 v_res = self.vehicle_model.predict(raw_frame, verbose=False, classes=[2,3,5,7], conf=0.4)[0]
