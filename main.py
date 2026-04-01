@@ -375,7 +375,6 @@ async def start_recording(camera_id: str, body: StartRecordingBody, db: Session 
 
     # Also kick off live processor if camera is in camera_processes
     if camera_id in camera_processes:
-        auto_name = _auto_filename(cam.name)
         recording_path = str(RECORDINGS_DIR / camera_id / auto_name)
         camera_processes[camera_id]["processor"].start_recording(
             file_path=recording_path, initiated_by=body.initiated_by, note=body.note, source="manual"
