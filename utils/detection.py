@@ -12,6 +12,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 from utils.db import SessionLocal, Detection, Camera, RecordingSession, AnalysisSession
 from sqlalchemy.sql import func
+from concurrent.futures import ThreadPoolExecutor
 
 # Load environment variables
 load_dotenv()
@@ -260,6 +261,9 @@ class LiveCameraProcessor:
         self.recording_file_path = None
         self.recording_source = "manual" # manual | auto | analysis
         
+        self.executor = ThreadPoolExecutor(max_workers=3)
+        self.active_visuals = {} # Stores {id: {'box': [x1,y1,x2,y2], 'label': '...'}}
+        
         self.add_log("System", "Initiating camera connection sequence...")
         
         import threading
@@ -360,125 +364,144 @@ class LiveCameraProcessor:
                 time.sleep(0.01)
                 continue
             
-            self.frame_count += 1
-            if self.frame_count % self.process_every_n_frames != 0:
-                # Update latest frame for streaming but skip heavy AI
-                self._update_latest_frame(self.raw_frame_buffer)
-                continue
-
-            try:
+                # --- 1. Prepare Frame for Output ---
                 frame = self.raw_frame_buffer
                 h, w = frame.shape[:2]
                 if w > 1280:
                     frame = cv2.resize(frame, (1280, int(h * (1280/w))))
-                raw_frame = frame.copy()
                 
-                for trigger_name, model in self.models.items():
-                    if model is None: continue
-                    results = model.track(frame, persist=True, verbose=False, iou=0.5, conf=0.4)[0]
+                # --- 2. AI Logic (Only every Nth frame) ---
+                if self.frame_count % self.process_every_n_frames == 0:
+                    raw_frame = frame.copy()
+                    new_visuals = {}
                     
-                    if results.boxes.id is not None:
-                        boxes = results.boxes.xyxy.cpu().numpy().astype(int)
-                        ids = results.boxes.id.cpu().numpy().astype(int)
-                        confs = results.boxes.conf.cpu().numpy()
+                    for trigger_name, model in self.models.items():
+                        if model is None: continue
+                        results = model.track(frame, persist=True, verbose=False, iou=0.5, conf=0.4)[0]
                         
-                        print(f"DEBUG [YOLO-DETECT]: Found {len(boxes)} objects on frame for {trigger_name}")
-                        
-                        for box, obj_id, conf in zip(boxes, ids, confs):
-                            x1, y1, x2, y2 = box
-                            unique_track_key = f"{trigger_name}_{obj_id}"
+                        if results.boxes.id is not None:
+                            boxes = results.boxes.xyxy.cpu().numpy().astype(int)
+                            ids = results.boxes.id.cpu().numpy().astype(int)
+                            confs = results.boxes.conf.cpu().numpy()
                             
-                            # Draw visual feedback
-                            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                            cv2.putText(frame, f"ID:{obj_id} {conf:.2f}", (x1, y1-5), 0, 0.4, (0,255,0), 1)
-                            
-                            if unique_track_key not in self.processed_track_ids:
-                                p_fname = f"{trigger_name.replace(' ', '_')}_{obj_id}_{int(time.time())}.jpg"
+                            for box, obj_id, conf in zip(boxes, ids, confs):
+                                x1, y1, x2, y2 = box
+                                unique_track_key = f"{trigger_name}_{obj_id}"
                                 
-                                # Take a TIGHT crop for plates, pad for others
-                                if trigger_name == "Number Plate Detection":
-                                    p_pad = 5
-                                    x1_p, y1_p = max(0, x1-p_pad), max(0, y1-p_pad)
-                                    x2_p, y2_p = min(frame.shape[1], x2+p_pad), min(frame.shape[0], y2+p_pad)
-                                    crop = raw_frame[y1_p:y2_p, x1_p:x2_p]
-                                else:
-                                    pad = 20
-                                    x1_c, y1_c = max(0, x1-pad), max(0, y1-pad)
-                                    x2_c, y2_c = min(frame.shape[1], x2+pad), min(frame.shape[0], y2+pad)
-                                    crop = raw_frame[y1_c:y2_c, x1_c:x2_c]
+                                # Maintain visual labeling
+                                label = f"{trigger_name} ({obj_id})"
+                                new_visuals[unique_track_key] = {'box': [x1,y1,x2,y2], 'label': label}
                                 
-                                if crop.size == 0: continue
-                                
-                                plate_text = ""
-                                v_color = "Unknown"
-                                r2_plate_url = None
-                                r2_object_url = None
-                                local_plate_path = None
-                                local_object_path = None
+                                # Background Logic for New Tracks
+                                if unique_track_key not in self.processed_track_ids:
+                                    self.processed_track_ids.add(unique_track_key)
+                                    self.executor.submit(
+                                        self._async_detection_logic, 
+                                        trigger_name, obj_id, box, raw_frame, unique_track_key
+                                    )
+                    self.active_visuals = new_visuals
 
-                                if trigger_name == "Number Plate Detection":
-                                    plate_text = get_best_ocr(crop)
-                                    if plate_text and plate_text in self.seen_plate_numbers: continue
-                                    if plate_text: self.seen_plate_numbers.add(plate_text)
-                                    
-                                    cv2.imwrite(os.path.join(crops_dir, p_fname), crop)
-                                    local_plate_path = f"/static/crops/{self.camera_id}/{p_fname}"
-                                    r2_plate_url = upload_to_r2(crop, trigger_name, p_fname)
-                                    
-                                    # Find clear vehicle crop for the plate
-                                    v_res = self.vehicle_model.predict(raw_frame, verbose=False, classes=[2,3,5,7], conf=0.4)[0]
-                                    for v_box in v_res.boxes:
-                                        vx1, vy1, vx2, vy2 = map(int, v_box.xyxy[0])
-                                        px, py = (x1+x2)/2, (y1+y2)/2
-                                        if vx1 <= px <= vx2 and vy1 <= py <= vy2:
-                                            v_crop = raw_frame[vy1:vy2, vx1:vx2]
-                                            v_color = get_vehicle_color(v_crop)
-                                            v_fname = f"v_{obj_id}_{int(time.time())}.jpg"
-                                            cv2.imwrite(os.path.join(crops_dir, v_fname), v_crop)
-                                            local_object_path = f"/static/crops/{self.camera_id}/{v_fname}"
-                                            r2_object_url = upload_to_r2(v_crop, trigger_name, v_fname)
-                                            break
-                                else:
-                                    # For other objects (Helmet, etc.), just crop the object carefully
-                                    cv2.imwrite(os.path.join(crops_dir, p_fname), crop)
-                                    local_object_path = f"/static/crops/{self.camera_id}/{p_fname}"
-                                    r2_object_url = upload_to_r2(crop, trigger_name, p_fname)
-
-                                self.processed_track_ids.add(unique_track_key)
-                                
-                                save_data = {
-                                    "task_id": self.camera_id,
-                                    "filename": self.camera_link,
-                                    "timestamp": 0.0,
-                                    "trigger": trigger_name,
-                                    "event": f"Detection (ID: {obj_id})",
-                                    "image_plate_url": r2_plate_url,
-                                    "image_object_url": r2_object_url,
-                                    "plate_number": plate_text or None,
-                                    "vehicle_color": v_color if v_color != "Unknown" else None
-                                }
-                                
-                                # Only save and log if we actually got a clear detection (esp for plates)
-                                if trigger_name == "Number Plate Detection" and not plate_text:
-                                    continue
-                                
-                                save_to_db(save_data)
-                                
-                                self.add_log(
-                                    trigger_name, 
-                                    f"Detected {trigger_name} (ID: {obj_id})",
-                                    plate=local_plate_path,
-                                    obj=local_object_path,
-                                    p_num=plate_text,
-                                    color=v_color,
-                                    r2=True if r2_plate_url or r2_object_url else False
-                                )
+                # --- 3. Draw Persistent Visuals on EVERY frame ---
+                for key, data in self.active_visuals.items():
+                    x1, y1, x2, y2 = data['box']
+                    label = data['label']
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                    cv2.putText(frame, label, (x1, y1-5), 0, 0.4, (0, 255, 0), 1)
 
                 self._update_latest_frame(frame)
                 
             except Exception as e:
                 print(f"[DEBUG] Error in processing loop: {e}")
                 time.sleep(0.1)
+
+    def _async_detection_logic(self, trigger_name, obj_id, box, raw_frame, unique_track_key):
+        """Heavy lifting (OCR, R2, DB) handled away from the visual stream thread."""
+        try:
+            x1, y1, x2, y2 = box
+            crops_dir = os.path.join("static", "crops", self.camera_id)
+            os.makedirs(crops_dir, exist_ok=True)
+            p_fname = f"{trigger_name.replace(' ', '_')}_{obj_id}_{int(time.time())}.jpg"
+            
+            # Take a TIGHT crop for plates, pad for others
+            if trigger_name == "Number Plate Detection":
+                p_pad = 5
+                x1_p, y1_p = max(0, x1-p_pad), max(0, y1-p_pad)
+                x2_p, y2_p = min(raw_frame.shape[1], x2+p_pad), min(raw_frame.shape[0], y2+p_pad)
+                crop = raw_frame[y1_p:y2_p, x1_p:x2_p]
+            else:
+                pad = 20
+                x1_c, y1_c = max(0, x1-pad), max(0, y1-pad)
+                x2_c, y2_c = min(raw_frame.shape[1], x2+pad), min(raw_frame.shape[0], y2+pad)
+                crop = raw_frame[y1_c:y2_c, x1_c:x2_c]
+            
+            if crop.size == 0: return
+            
+            plate_text = ""
+            v_color = "Unknown"
+            r2_plate_url = None
+            r2_object_url = None
+            local_plate_path = None
+            local_object_path = None
+
+            if trigger_name == "Number Plate Detection":
+                plate_text = get_best_ocr(crop)
+                if plate_text and plate_text in self.seen_plate_numbers: return
+                if plate_text: self.seen_plate_numbers.add(plate_text)
+                
+                cv2.imwrite(os.path.join(crops_dir, p_fname), crop)
+                local_plate_path = f"/static/crops/{self.camera_id}/{p_fname}"
+                r2_plate_url = upload_to_r2(crop, trigger_name, p_fname)
+                
+                # Update visual label with the detected plate number
+                if plate_text:
+                    self.active_visuals[unique_track_key]['label'] = f"PLATE: {plate_text}"
+                
+                # Find clear vehicle crop
+                v_res = self.vehicle_model.predict(raw_frame, verbose=False, classes=[2,3,5,7], conf=0.4)[0]
+                for v_box in v_res.boxes:
+                    vx1, vy1, vx2, vy2 = map(int, v_box.xyxy[0])
+                    px, py = (x1+x2)/2, (y1+y2)/2
+                    if vx1 <= px <= vx2 and vy1 <= py <= vy2:
+                        v_crop = raw_frame[vy1:vy2, vx1:vx2]
+                        v_color = get_vehicle_color(v_crop)
+                        v_fname = f"v_{obj_id}_{int(time.time())}.jpg"
+                        cv2.imwrite(os.path.join(crops_dir, v_fname), v_crop)
+                        local_object_path = f"/static/crops/{self.camera_id}/{v_fname}"
+                        r2_object_url = upload_to_r2(v_crop, trigger_name, v_fname)
+                        break
+            else:
+                cv2.imwrite(os.path.join(crops_dir, p_fname), crop)
+                local_object_path = f"/static/crops/{self.camera_id}/{p_fname}"
+                r2_object_url = upload_to_r2(crop, trigger_name, p_fname)
+
+            # Skip saving if Plate Detection but no plate read
+            if trigger_name == "Number Plate Detection" and not plate_text:
+                return
+
+            save_data = {
+                "task_id": self.camera_id,
+                "filename": self.camera_link,
+                "timestamp": 0.0,
+                "trigger": trigger_name,
+                "event": f"Detection (ID: {obj_id})",
+                "image_plate_url": r2_plate_url,
+                "image_object_url": r2_object_url,
+                "plate_number": plate_text or None,
+                "vehicle_color": v_color if v_color != "Unknown" else None
+            }
+            save_to_db(save_data)
+            
+            self.add_log(
+                trigger_name, 
+                f"Detected {trigger_name} (ID: {obj_id})",
+                plate=local_plate_path,
+                obj=local_object_path,
+                p_num=plate_text,
+                color=v_color,
+                r2=True if r2_plate_url or r2_object_url else False
+            )
+        except Exception as e:
+            print(f"Async Detection Error: {e}")
 
             # --- RECORDING LOGIC (CONSOLIDATED) ---
             if self.is_recording and self.latest_frame is not None:
