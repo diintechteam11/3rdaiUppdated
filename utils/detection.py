@@ -364,8 +364,10 @@ class LiveCameraProcessor:
                 time.sleep(0.01)
                 continue
             
+            self.frame_count += 1
+            try:
                 # --- 1. Prepare Frame for Output ---
-                frame = self.raw_frame_buffer
+                frame = self.raw_frame_buffer.copy()
                 h, w = frame.shape[:2]
                 if w > 1280:
                     frame = cv2.resize(frame, (1280, int(h * (1280/w))))
