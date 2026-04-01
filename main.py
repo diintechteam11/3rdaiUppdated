@@ -57,7 +57,7 @@ API_KEYS_FILE  = BASE_DIR / "api_keys.json"
 for d in [UPLOAD_DIR, OUTPUT_DIR, CROPS_DIR, RECORDINGS_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 
-app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 # ─── In-memory state (existing AI detection system) ─────────────────────────

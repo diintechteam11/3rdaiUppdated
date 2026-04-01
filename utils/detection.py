@@ -534,29 +534,26 @@ class LiveCameraProcessor:
             
             duration = int(time.time() - self.recording_start_time) if self.recording_start_time else 0
             
-            # Transcode to H.264 for browser playback once recording is done
-            if os.path.exists(raw_path):
-                print(f"[RECORDR] Raw file exists ({os.path.getsize(raw_path)} bytes). Starting transcode...")
-                try:
-                    cmd = ['ffmpeg', '-y', '-i', raw_path, '-c:v', 'libx264', '-crf', '28', '-preset', 'ultrafast', '-movflags', '+faststart', '-pix_fmt', 'yuv420p', out_path]
-                    print(f"[RECORDR] Running FFmpeg: {' '.join(cmd)}")
-                    res = subprocess.run(cmd, check=True, timeout=60, capture_output=True)
-                    if os.path.exists(out_path):
-                        print(f"[RECORDR] SUCCESS: Video transcoded to {out_path} ({os.path.getsize(out_path)} bytes)")
-                        if os.path.exists(raw_path): os.remove(raw_path)
-                    else:
-                        print(f"[RECORDR] ERROR: FFmpeg returned success but {out_path} not found!")
-                except Exception as fe:
-                    print(f"[RECORDR] FFmpeg transcode FAILED: {fe}")
-                    if hasattr(fe, 'stderr'): print(f"[FFMPEG-STDERR] {fe.stderr.decode(errors='ignore')}")
-                    # Fallback to raw file if transcode failed but raw exists
-                    if not os.path.exists(out_path): 
-                        print(f"[RECORDR] FALLBACK: Renaming raw to {out_path}")
-                        os.rename(raw_path, out_path)
-            else:
-                print(f"[RECORDR] ERROR: Raw file NOT FOUND at {raw_path}. Recording可能是空的!")
+            # Start transcoding in a BACKGROUND THREAD to prevent API blocking
+            import threading
+            def _bg_transcode():
+                if os.path.exists(raw_path):
+                    print(f"[RECORDR-BG] Starting background transcode: {raw_path}")
+                    try:
+                        cmd = ['ffmpeg', '-y', '-i', raw_path, '-c:v', 'libx264', '-crf', '28', '-preset', 'ultrafast', '-movflags', '+faststart', '-pix_fmt', 'yuv420p', out_path]
+                        subprocess.run(cmd, check=True, timeout=120, capture_output=True)
+                        if os.path.exists(out_path):
+                            print(f"[RECORDR-BG] Finalized: {out_path}")
+                            if os.path.exists(raw_path): os.remove(raw_path)
+                    except Exception as fe:
+                        print(f"[RECORDR-BG] Transcode error: {fe}")
+                        if not os.path.exists(out_path): os.rename(raw_path, out_path)
+                else:
+                    print(f"[RECORDR-BG] Error: Raw file missing for transcode: {raw_path}")
 
-            self.add_log("Recording", f"Stopped recording. Duration: {duration}s", r2=False)
+            threading.Thread(target=_bg_transcode, daemon=True).start()
+
+            self.add_log("Recording", f"Stopped recording. Duration: {duration}s. Transcoding in background...", r2=False)
             return True, self.recording_session_id
         except Exception as e:
             print(f"Error stopping recording: {e}")
