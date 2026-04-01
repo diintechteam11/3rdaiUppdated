@@ -195,7 +195,7 @@ def get_best_ocr(crop_img):
                     print(f"Debug: Valid Plate Recognizer Result: {clean_text}")
                     return clean_text
         else:
-            print(f"Debug: Plate Recognizer API Error: {response.status_code}")
+            print(f"DEBUG [OCR-API-ERROR]: Plate Recognizer returned {response.status_code} (429 means you hit your Free Tier limit!)")
     except Exception as e:
         print(f"Debug: Plate Recognizer API Connection Error: {e}")
     try:
@@ -208,7 +208,9 @@ def get_best_ocr(crop_img):
                     print(f"Debug: Valid Local OCR Result: {clean_local}")
                     return clean_local
     except Exception as local_err:
-        print(f"Debug: Local OCR Fallback Error: {local_err}")
+        print(f"DEBUG [OCR-LOCAL-ERROR]: Local EasyOCR Error: {local_err}")
+    
+    print(f"DEBUG [OCR-FINAL]: No valid plate text could be extracted from this crop.")
     return ""
 
 _loaded_models_cache = {}
@@ -456,7 +458,10 @@ class LiveCameraProcessor:
                 
                 # Update visual label with the detected plate number
                 if plate_text:
+                    print(f"DEBUG [SUCCESS]: Detected Plate Number -> {plate_text}")
                     self.active_visuals[unique_track_key]['label'] = f"PLATE: {plate_text}"
+                else:
+                    print(f"DEBUG [FAILED]: Plate detected by AI but OCR failed to read it.")
                 
                 # Find clear vehicle crop
                 v_res = self.vehicle_model.predict(raw_frame, verbose=False, classes=[2,3,5,7], conf=0.4)[0]
