@@ -47,10 +47,11 @@ def _migrate_db():
 
 # ─── Directories ────────────────────────────────────────────────────────────
 BASE_DIR       = Path(__file__).resolve().parent
-UPLOAD_DIR     = BASE_DIR / "static" / "uploads"
-OUTPUT_DIR     = BASE_DIR / "static" / "outputs"
-CROPS_DIR      = BASE_DIR / "static" / "crops"
-RECORDINGS_DIR = BASE_DIR / "static" / "recordings"
+STATIC_DIR     = BASE_DIR / "static"
+UPLOAD_DIR     = STATIC_DIR / "uploads"
+OUTPUT_DIR     = STATIC_DIR / "outputs"
+CROPS_DIR      = STATIC_DIR / "crops"
+RECORDINGS_DIR = STATIC_DIR / "recordings"
 TEMPLATES_DIR  = BASE_DIR / "templates"
 API_KEYS_FILE  = BASE_DIR / "api_keys.json"
 
