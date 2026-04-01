@@ -222,9 +222,10 @@ def get_model(trigger_name):
             model_path = "yolov8n.pt"
         try:
             _loaded_models_cache[cache_key] = YOLO(model_path)
-            print(f"Debug: Loaded model {model_filename} for {trigger_name}")
+            print(f"DEBUG [YOLO-INIT]: Successfully loaded {model_filename} for {trigger_name}")
+            print(f"DEBUG [YOLO-RES]: Using internal resolution width: 640 (standard YOLO) | Rescaling to: 1280 (app standard)")
         except Exception as e:
-            print(f"Debug: Error loading model {model_filename}: {e}")
+            print(f"DEBUG [YOLO-ERROR]: Failed to load model {model_filename}: {e}")
             return None
     return _loaded_models_cache[cache_key]
 
@@ -380,6 +381,8 @@ class LiveCameraProcessor:
                         boxes = results.boxes.xyxy.cpu().numpy().astype(int)
                         ids = results.boxes.id.cpu().numpy().astype(int)
                         confs = results.boxes.conf.cpu().numpy()
+                        
+                        print(f"DEBUG [YOLO-DETECT]: Found {len(boxes)} objects on frame for {trigger_name}")
                         
                         for box, obj_id, conf in zip(boxes, ids, confs):
                             x1, y1, x2, y2 = box
