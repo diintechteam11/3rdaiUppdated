@@ -483,11 +483,15 @@ class LiveCameraProcessor:
                     try:
                         h, w = self.latest_frame.shape[:2]
                         raw_path = self.recording_file_path.replace(".mp4", "_raw.mp4")
+                        print(f"[RECORDR] Opening VideoWriter: {raw_path} | SIZE: {w}x{h}")
                         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
                         self.video_writer = cv2.VideoWriter(raw_path, fourcc, 20, (w, h))
-                        print(f"DEBUG: Opened VideoWriter at {w}x{h} for {raw_path}")
+                        if not self.video_writer.isOpened():
+                            print(f"[RECORDR] FATAL: VideoWriter failed to open for {raw_path}")
+                        else:
+                            print(f"[RECORDR] SUCCESS: VideoWriter opened.")
                     except Exception as ve:
-                        print(f"Error opening VideoWriter: {ve}")
+                        print(f"[RECORDR] EXCEPTION opening VideoWriter: {ve}")
                 
                 if self.video_writer:
                     self.video_writer.write(self.latest_frame)
@@ -532,13 +536,25 @@ class LiveCameraProcessor:
             
             # Transcode to H.264 for browser playback once recording is done
             if os.path.exists(raw_path):
+                print(f"[RECORDR] Raw file exists ({os.path.getsize(raw_path)} bytes). Starting transcode...")
                 try:
-                    subprocess.run(['ffmpeg', '-y', '-i', raw_path, '-c:v', 'libx264', '-crf', '28', '-preset', 'ultrafast', '-movflags', '+faststart', '-pix_fmt', 'yuv420p', out_path], check=True, timeout=30, capture_output=True)
-                    if os.path.exists(raw_path): os.remove(raw_path)
-                    print(f"DEBUG: Video saved and transcoded to {out_path}")
+                    cmd = ['ffmpeg', '-y', '-i', raw_path, '-c:v', 'libx264', '-crf', '28', '-preset', 'ultrafast', '-movflags', '+faststart', '-pix_fmt', 'yuv420p', out_path]
+                    print(f"[RECORDR] Running FFmpeg: {' '.join(cmd)}")
+                    res = subprocess.run(cmd, check=True, timeout=60, capture_output=True)
+                    if os.path.exists(out_path):
+                        print(f"[RECORDR] SUCCESS: Video transcoded to {out_path} ({os.path.getsize(out_path)} bytes)")
+                        if os.path.exists(raw_path): os.remove(raw_path)
+                    else:
+                        print(f"[RECORDR] ERROR: FFmpeg returned success but {out_path} not found!")
                 except Exception as fe:
-                    print(f"FFmpeg transcode FAILED: {fe}")
-                    if not os.path.exists(out_path): os.rename(raw_path, out_path)
+                    print(f"[RECORDR] FFmpeg transcode FAILED: {fe}")
+                    if hasattr(fe, 'stderr'): print(f"[FFMPEG-STDERR] {fe.stderr.decode(errors='ignore')}")
+                    # Fallback to raw file if transcode failed but raw exists
+                    if not os.path.exists(out_path): 
+                        print(f"[RECORDR] FALLBACK: Renaming raw to {out_path}")
+                        os.rename(raw_path, out_path)
+            else:
+                print(f"[RECORDR] ERROR: Raw file NOT FOUND at {raw_path}. Recording可能是空的!")
 
             self.add_log("Recording", f"Stopped recording. Duration: {duration}s", r2=False)
             return True, self.recording_session_id

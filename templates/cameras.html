@@ -505,11 +505,14 @@ async function loadRecordings(page=1) {
               ? `<button class="btn-primary text-xs" onclick="openVideoModal('${r.file_path}', this.dataset.videoName)" data-video-name="${(r.video_name||'Recording').replace(/"/g, '&quot;')}">
                   <svg class="w-3 h-3 inline mr-1" fill="currentColor" viewBox="0 0 20 20"><path d="M6.3 2.841A1.5 1.5 0 004 4.11V15.89a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z"/></svg>
                   ▶ Play
-                 </button>`
+                 </button>
+                 <a href="${r.file_path}" target="_blank" class="px-2 py-1 bg-white/5 hover:bg-white/10 rounded text-[10px] text-slate-400 no-underline transition-colors" title="Download or open raw link">Direct Link</a>
+                 <button class="px-2 py-1 bg-indigo-500/10 hover:bg-indigo-500/20 rounded text-[10px] text-indigo-400 border border-indigo-500/20" onclick="debugCheckFile('${r.id}')">Debug Link</button>`
               : '<span class="text-[10px] text-slate-600 italic">No file recorded</span>'}
             <button class="btn-danger text-xs" onclick="deleteRec('${r.id}')">Delete</button>
           </div>
         </div>
+        ${r.file_path ? `<div class="mt-2 text-[9px] text-slate-600 font-mono truncate bg-black/20 p-1 rounded">Path: ${r.file_path}</div>` : ''}
       </div>`).join('');
 
   const totalPages = Math.ceil(data.total/10);
@@ -525,6 +528,19 @@ async function deleteRec(id) {
   const data = await api('DELETE', `/recordings/${id}?delete_file=${delFile}`);
   if (data?.error) { toast(data.message, true); return; }
   toast('Recording deleted.'); loadRecordings(recPage);
+}
+
+async function debugCheckFile(id) {
+  const data = await api('GET', `/recordings/${id}/debug-check-file`);
+  if (!data) return;
+  if (data.error) { alert(`Error: ${data.message}`); return; }
+  
+  const msg = `--- DEBUG INFO ---\n` +
+              `Exists on Disk: ${data.exists_on_disk ? '✅ YES' : '❌ NO'}\n` +
+              `DB Path: ${data.db_path}\n` +
+              `Abs Path: ${data.calculated_abs_path}\n` +
+              (data.exists_on_disk ? `Size: ${data.details.size_bytes} bytes\nCreated: ${data.details.created}` : `Issue: Server cannot find file at calculated path.`);
+  alert(msg);
 }
 
 // ═══════════════════════════════════════════════════════════

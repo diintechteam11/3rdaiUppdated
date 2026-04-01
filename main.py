@@ -181,6 +181,43 @@ async def generate_api_key():
     save_keys(keys)
     return {"api_key": new_key}
 
+@app.get("/api/v1/recordings/{recording_id}/debug-check-file")
+async def debug_check_recording_file(recording_id: str, db: Session = Depends(get_db)):
+    """Deep debug: Check if the file actually exists on the server disk."""
+    rec = db.query(RecordingSession).filter(RecordingSession.id == recording_id).first()
+    if not rec:
+        return {"error": True, "message": "Recording not found in DB"}
+    
+    # Path stored in DB
+    db_path = rec.file_path
+    abs_path = None
+    exists = False
+    details = {}
+
+    if db_path.startswith("/static/"):
+        rel = db_path.replace("/static/", "")
+        abs_path = str(STATIC_DIR / rel)
+    elif db_path.startswith("static/"):
+        abs_path = str(Path(db_path).resolve())
+    
+    if abs_path and os.path.exists(abs_path):
+        exists = True
+        details = {
+            "size_bytes": os.path.getsize(abs_path),
+            "created": time.ctime(os.path.getctime(abs_path)),
+            "is_file": os.path.isfile(abs_path)
+        }
+    
+    return {
+        "recording_id": recording_id,
+        "db_path": db_path,
+        "calculated_abs_path": abs_path,
+        "exists_on_disk": exists,
+        "details": details,
+        "base_dir": str(BASE_DIR),
+        "static_dir": str(STATIC_DIR)
+    }
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # CAMERA MANAGEMENT  /api/v1/cameras
 # ═══════════════════════════════════════════════════════════════════════════════
