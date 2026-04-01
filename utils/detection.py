@@ -109,7 +109,7 @@ def save_to_db(data):
 os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
 
 # PLATE RECOGNIZER CLOUD API CONFIGURATION
-PLATE_RECOGNIZER_TOKEN = "cabf3c65d1ec04ff52c1d5d0489fb083cdd2e305"
+PLATE_RECOGNIZER_TOKEN = "4c4ed26b9a36848a897178aca57d428ec3358ed7"
 PLATE_RECOGNIZER_URL = 'https://api.platerecognizer.com/v1/plate-reader/'
 
 # OCR INITIALIZATION
