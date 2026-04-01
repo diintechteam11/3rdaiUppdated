@@ -379,21 +379,7 @@ class LiveCameraProcessor:
                     raw_frame = frame.copy()
                     new_visuals = {}
                     
-                    # 2a. Global Vehicle Tracking (Detect all cars, bikes, buses)
-                    v_results = self.vehicle_model.track(frame, persist=True, verbose=False, classes=[2,3,5,7], conf=0.4)[0]
-                    if v_results.boxes.id is not None:
-                        v_boxes = v_results.boxes.xyxy.cpu().numpy().astype(int)
-                        v_ids = v_results.boxes.id.cpu().numpy().astype(int)
-                        for v_box, v_id in zip(v_boxes, v_ids):
-                            vx1, vy1, vx2, vy2 = v_box
-                            v_key = f"Vehicle_{v_id}"
-                            new_visuals[v_key] = {'box': [vx1, vy1, vx2, vy2], 'label': f"Vehicle #{v_id}"}
-                            
-                            if v_key not in self.processed_track_ids:
-                                self.processed_track_ids.add(v_key)
-                                self.executor.submit(self._async_detection_logic, "Vehicle Detection", v_id, v_box, raw_frame, v_key)
-
-                    # 2b. Trigger-Specific Logic (Number Plate, Helmet, etc.)
+                    # Trigger-Specific Logic (Number Plate, Helmet, etc.)
                     for trigger_name, model in self.models.items():
                         if model is None: continue
                         results = model.track(frame, persist=True, verbose=False, iou=0.5, conf=0.4)[0]
@@ -483,7 +469,8 @@ class LiveCameraProcessor:
                             if vx1 <= px <= vx2 and vy1 <= py <= vy2:
                                 self.active_visuals[v_key]['label'] = f"Vehicle #{v_key.split('_')[-1]} | {plate_text}"
                 else:
-                    print(f"DEBUG [FAILED]: Plate detected by AI but OCR failed to read it.")
+                    print(f"DEBUG [INFO]: Plate detected but OCR returned no text (API Limit or poor quality). Logging as Unreadable.")
+                    self.active_visuals[unique_track_key]['label'] = f"PLATE: [Unreadable]"
                 
                 # Find clear vehicle crop
                 v_res = self.vehicle_model.predict(raw_frame, verbose=False, classes=[2,3,5,7], conf=0.4)[0]
@@ -503,9 +490,8 @@ class LiveCameraProcessor:
                 local_object_path = f"/static/crops/{self.camera_id}/{p_fname}"
                 r2_object_url = upload_to_r2(crop, trigger_name, p_fname)
 
-            # Skip saving if Plate Detection but no plate read
-            if trigger_name == "Number Plate Detection" and not plate_text:
-                return
+            # Log as Unreadable if text is missing, instead of skipping
+            display_plate = plate_text if plate_text else "Unreadable"
 
             save_data = {
                 "task_id": self.camera_id,
@@ -515,7 +501,7 @@ class LiveCameraProcessor:
                 "event": f"Detection (ID: {obj_id})",
                 "image_plate_url": r2_plate_url,
                 "image_object_url": r2_object_url,
-                "plate_number": plate_text or None,
+                "plate_number": display_plate,
                 "vehicle_color": v_color if v_color != "Unknown" else None
             }
             save_to_db(save_data)
