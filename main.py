@@ -46,17 +46,20 @@ def _migrate_db():
                 print(f"[Migration] Skipped (already exists or error): {e}")
 
 # ─── Directories ────────────────────────────────────────────────────────────
-BASE_DIR       = Path(__file__).resolve().parent
-STATIC_DIR     = BASE_DIR / "static"
-UPLOAD_DIR     = STATIC_DIR / "uploads"
-OUTPUT_DIR     = STATIC_DIR / "outputs"
-CROPS_DIR      = STATIC_DIR / "crops"
+# --- GLOBAL DIRECTORY SETUP ---
+BASE_DIR = Path(__file__).resolve().parent
+STATIC_DIR = BASE_DIR / "static"
 RECORDINGS_DIR = STATIC_DIR / "recordings"
-TEMPLATES_DIR  = BASE_DIR / "templates"
-API_KEYS_FILE  = BASE_DIR / "api_keys.json"
+CROPS_DIR = STATIC_DIR / "crops"
+UPLOADS_DIR = STATIC_DIR / "uploads"
+OUTPUTS_DIR = STATIC_DIR / "outputs"
 
-for d in [UPLOAD_DIR, OUTPUT_DIR, CROPS_DIR, RECORDINGS_DIR]:
-    d.mkdir(parents=True, exist_ok=True)
+# Ensure all critical folders exist on startup
+for _dir in [STATIC_DIR, RECORDINGS_DIR, CROPS_DIR, UPLOADS_DIR, OUTPUTS_DIR]:
+    _path = Path(_dir)
+    if not _path.exists():
+        print(f"[DEBUG] Creating directory: {_path}")
+        _path.mkdir(parents=True, exist_ok=True)
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))

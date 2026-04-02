@@ -526,23 +526,28 @@ class LiveCameraProcessor:
                 print(f"[DEBUG] Error in processing loop: {e}")
                 time.sleep(0.1)
 
-            # --- RECORDING LOGIC (CONSOLIDATED) ---
+            # --- RECORDING LOGIC (STABILIZED) ---
             if self.is_recording and self.latest_frame is not None:
                 if self.video_writer is None:
                     try:
-                        h, w = self.latest_frame.shape[:2]
+                        h1, w1 = self.latest_frame.shape[:2]
+                        # Ensure recording folder exists
+                        os.makedirs(os.path.dirname(self.recording_file_path), exist_ok=True)
+                        
                         raw_path = self.recording_file_path.replace(".mp4", "_raw.mp4")
-                        print(f"[RECORDR] Opening VideoWriter: {raw_path} | SIZE: {w}x{h}")
-                        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-                        self.video_writer = cv2.VideoWriter(raw_path, fourcc, 20, (w, h))
+                        print(f"[RECORDR] Starting VideoWriter: {raw_path} | Size: {w1}x{h1}")
+                        
+                        fourcc = cv2.VideoWriter_fourcc(*'mp4v') # High compatibility for Linux/Win
+                        self.video_writer = cv2.VideoWriter(raw_path, fourcc, 20.0, (w1, h1))
+                        
                         if not self.video_writer.isOpened():
-                            print(f"[RECORDR] FATAL: VideoWriter failed to open for {raw_path}")
+                            print(f"[RECORDR] ERROR: VideoWriter failed to open raw_path: {raw_path}")
                         else:
-                            print(f"[RECORDR] SUCCESS: VideoWriter opened.")
+                            print(f"[RECORDR] SUCCESS: Recording started at {raw_path}")
                     except Exception as ve:
-                        print(f"[RECORDR] EXCEPTION opening VideoWriter: {ve}")
+                        print(f"[RECORDR] EXCEPTION in VideoWriter Setup: {ve}")
                 
-                if self.video_writer:
+                if self.video_writer and self.video_writer.isOpened():
                     self.video_writer.write(self.latest_frame)
     def start_recording(self, file_path, initiated_by="System", note=None, source="manual", analysis_session_id=None):
         if self.is_recording:
