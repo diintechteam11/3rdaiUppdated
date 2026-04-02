@@ -382,7 +382,11 @@ async def start_recording(camera_id: str, body: StartRecordingBody, db: Session 
     if camera_id in camera_processes:
         recording_path = str(RECORDINGS_DIR / camera_id / auto_name)
         camera_processes[camera_id]["processor"].start_recording(
-            file_path=recording_path, initiated_by=body.initiated_by, note=body.note, source="manual"
+            file_path=recording_path, 
+            initiated_by=body.initiated_by, 
+            note=body.note, 
+            source="manual",
+            recording_session_id=session_id
         )
 
     return {
@@ -799,7 +803,11 @@ async def analysis_start(camera_id: str, body: AnalysisStartBody, db: Session = 
         auto_name = _auto_filename(cam.name)
         recording_path = str(RECORDINGS_DIR / camera_id / auto_name)
         camera_processes[camera_id]["processor"].start_recording(
-            file_path=recording_path, initiated_by=body.triggered_by, source="analysis", analysis_session_id=analysis_id
+            file_path=recording_path, 
+            initiated_by=body.triggered_by, 
+            source="analysis", 
+            analysis_session_id=analysis_id,
+            recording_session_id=session_id
         )
 
     return {

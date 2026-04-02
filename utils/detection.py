@@ -549,14 +549,14 @@ class LiveCameraProcessor:
                 
                 if self.video_writer and self.video_writer.isOpened():
                     self.video_writer.write(self.latest_frame)
-    def start_recording(self, file_path, initiated_by="System", note=None, source="manual", analysis_session_id=None):
+    def start_recording(self, file_path, initiated_by="System", note=None, source="manual", analysis_session_id=None, recording_session_id=None):
         if self.is_recording:
             return False, "Already recording"
         
         try:
             self.recording_source = source
             self.analysis_session_id = analysis_session_id
-            self.recording_session_id = str(uuid.uuid4())
+            self.recording_session_id = recording_session_id or str(uuid.uuid4())
             
             # Use provided path
             self.recording_file_path = file_path
