@@ -1048,20 +1048,10 @@ async def ws_camera_stream(websocket: WebSocket, camera_id: str):
     try:
         while True:
             if processor.latest_jpeg:
-                try:
-                    await websocket.send_bytes(processor.latest_jpeg)
-                except Exception as send_err:
-                    # If send fails, break the loop and close
-                    print(f"WS Send Error: {send_err}")
-                    break
-            await asyncio.sleep(0.05) # Increased slightly to 50ms (20fps) for stability
-    except (WebSocketDisconnect, Exception) as e:
-        print(f"WS Connection Closed: {e}")
-    finally:
-        try:
-            await websocket.close()
-        except:
-            pass
+                await websocket.send_bytes(processor.latest_jpeg)
+            await asyncio.sleep(0.04)
+    except (WebSocketDisconnect, Exception):
+        pass
 
 
 @app.get("/camera-logs/{camera_id}")

@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3rdAI | Project Intelligence Guide</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #6366f1;
+            --secondary: #8b5cf6;
+            --accent: #10b981;
+            --bg: #0f172a;
+            --card-bg: rgba(30, 41, 59, 0.7);
+            --glass-border: rgba(255, 255, 255, 0.1);
+            --text-main: #f8fafc;
+            --text-dim: #94a3b8;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Inter', sans-serif;
+        }
+
+        body {
+            background: var(--bg);
+            color: var(--text-main);
+            line-height: 1.6;
+            overflow-x: hidden;
+            background-image: 
+                radial-gradient(circle at 10% 20%, rgba(99, 102, 241, 0.15) 0%, transparent 40%),
+                radial-gradient(circle at 90% 80%, rgba(139, 92, 246, 0.15) 0%, transparent 40%);
+            background-attachment: fixed;
+        }
+
+        h1, h2, h3 {
+            font-family: 'Outfit', sans-serif;
+            font-weight: 800;
+            letter-spacing: -0.02em;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 4rem 2rem;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 5rem;
+        }
+
+        .badge {
+            background: rgba(99, 102, 241, 0.2);
+            color: var(--primary);
+            padding: 0.5rem 1.25rem;
+            border-radius: 999px;
+            font-size: 0.875rem;
+            font-weight: 600;
+            border: 1px solid rgba(99, 102, 241, 0.3);
+            display: inline-block;
+            margin-bottom: 1.5rem;
+        }
+
+        .header h1 {
+            font-size: 4rem;
+            margin-bottom: 1rem;
+            background: linear-gradient(to right, #fff, var(--primary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .header p {
+            color: var(--text-dim);
+            font-size: 1.25rem;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        /* Card Section */
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+            margin-bottom: 4rem;
+        }
+
+        .card {
+            background: var(--card-bg);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--glass-border);
+            border-radius: 24px;
+            padding: 2.5rem;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .card:hover {
+            transform: translateY(-8px);
+            border-color: rgba(99, 102, 241, 0.4);
+            box-shadow: 0 20px 40px -12px rgba(0, 0, 0, 0.5);
+        }
+
+        .card-icon {
+            width: 48px;
+            height: 48px;
+            background: var(--primary);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 1.5rem;
+            font-size: 1.5rem;
+            box-shadow: 0 8px 16px -4px rgba(99, 102, 241, 0.4);
+        }
+
+        .card h3 {
+            font-size: 1.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .card p {
+            color: var(--text-dim);
+            font-size: 0.95rem;
+        }
+
+        /* Debug Section */
+        .debug-section {
+            background: rgba(15, 23, 42, 0.8);
+            border: 1px solid var(--glass-border);
+            border-radius: 24px;
+            padding: 3rem;
+            margin-top: 4rem;
+        }
+
+        .debug-header {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .debug-header .dot {
+            width: 12px;
+            height: 12px;
+            background: #ef4444;
+            border-radius: 50%;
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(1.2); }
+            100% { opacity: 1; transform: scale(1); }
+        }
+
+        .function-flow {
+            list-style: none;
+        }
+
+        .flow-item {
+            display: flex;
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+            position: relative;
+        }
+
+        .flow-item:not(:last-child)::after {
+            content: '';
+            position: absolute;
+            left: 20px;
+            top: 40px;
+            bottom: -20px;
+            width: 2px;
+            background: var(--glass-border);
+        }
+
+        .flow-number {
+            min-width: 40px;
+            height: 40px;
+            background: #1e293b;
+            border: 1px solid var(--glass-border);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            color: var(--primary);
+            z-index: 1;
+        }
+
+        .flow-content h4 {
+            font-size: 1.1rem;
+            margin-bottom: 0.5rem;
+            color: white;
+        }
+
+        .flow-content p {
+            font-size: 0.9rem;
+            color: var(--text-dim);
+        }
+
+        .code-block {
+            background: #020617;
+            padding: 1rem;
+            border-radius: 12px;
+            font-family: 'Fira Code', monospace;
+            font-size: 0.85rem;
+            margin-top: 0.75rem;
+            color: #10b981;
+            border: 1px solid #1e293b;
+        }
+
+        footer {
+            text-align: center;
+            padding: 4rem 0;
+            color: var(--text-dim);
+            font-size: 0.875rem;
+            border-top: 1px solid var(--glass-border);
+            margin-top: 6rem;
+        }
+
+        /* Responsive Improvements */
+        @media (max-width: 768px) {
+            .header h1 { font-size: 2.5rem; }
+            .container { padding: 2rem 1rem; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <header class="header">
+            <span class="badge">Internal Knowledge Library</span>
+            <h1>Intelligence Explainer</h1>
+            <p>Everything you need to know about the 3rdAI Video Analytics Platform — Explained simply.</p>
+        </header>
+
+        <section class="grid">
+            <!-- WHAT IS IT -->
+            <div class="card">
+                <div class="card-icon">🎯</div>
+                <h3>What is this Project?</h3>
+                <p>3rdAI is a high-performance <strong>AI Traffic Enforcement & Monitoring System</strong>. It uses computer vision to automatically detect road violations and identify vehicles from live camera feeds or video files.</p>
+            </div>
+
+            <!-- HOW IT WORKS -->
+            <div class="card">
+                <div class="card-icon">⚙️</div>
+                <h3>How does it work?</h3>
+                <p>The system watches a video feed frame-by-frame. When it sees a vehicle, it applies specialized AI models to check for violations like missing helmets or seatbelts. It then captures a photo (crop) and saves the data to the cloud.</p>
+            </div>
+
+            <!-- TECH STACK -->
+            <div class="card">
+                <div class="card-icon">🛠️</div>
+                <h3>What is used?</h3>
+                <p>Built with <strong>FastAPI</strong> (Speed), <strong>YOLOv8</strong> (Brain/AI), <strong>OpenCV</strong> (Vision), <strong>PostgreSQL</strong> (Memory), and <strong>Cloudflare R2</strong> (Evidence Storage). We use <strong>WebSockets</strong> for real-time live streaming.</p>
+            </div>
+
+            <!-- MODELS -->
+            <div class="card">
+                <div class="card-icon">🧠</div>
+                <h3>Which model is used?</h3>
+                <p>We use multiple <strong>YOLOv8 Precise Models</strong>: 
+                    <br>• <code>ANPR.pt</code> for Plates
+                    <br>• <code>helmet.pt</code> for Security
+                    <br>• <code>triple.pt</code> for Riders
+                    <br>• <code>seatbelt.pt</code> for Drivers</p>
+            </div>
+
+            <!-- WHY -->
+            <div class="card">
+                <div class="card-icon">❓</div>
+                <h3>Why use this?</h3>
+                <p>Standard cameras just record; this camera <strong>understands</strong>. It removes the need for manual monitoring, detects violations 24/7 with 95%+ accuracy, and provides instant searchable digital records.</p>
+            </div>
+
+            <!-- WHERE -->
+            <div class="card">
+                <div class="card-icon">📍</div>
+                <h3>Where is it used?</h3>
+                <p>Ideal for <strong>Smart Cities</strong>, Highway Toll Gates, Private Society Entrances, and Traffic Law Enforcement Agencies who want to automate surveillance and penalties.</p>
+            </div>
+        </section>
+
+        <!-- DEBUG FLOW -->
+        <div class="debug-section">
+            <div class="debug-header">
+                <div class="dot"></div>
+                <h2>Live Detection & Debug Flow</h2>
+            </div>
+            <p style="color: var(--text-dim); margin-bottom: 2.5rem;">How the system "thinks" and how you can track its actions:</p>
+
+            <ul class="function-flow">
+                <li class="flow-item">
+                    <div class="flow-number">1</div>
+                    <div class="flow-content">
+                        <h4>Camera Feed Connection</h4>
+                        <p>The system tries connecting via TCP first (for stability), then UDP (for speed). If it fails, it retries automatically.</p>
+                        <div class="code-block">DEBUG: Trying connection via FFmpeg TCP... SUCCESS!</div>
+                    </div>
+                </li>
+
+                <li class="flow-item">
+                    <div class="flow-number">2</div>
+                    <div class="flow-content">
+                        <h4>Real-time Tracking</h4>
+                        <p>As frames come in, YOLOv8 assigns a "Track ID" to every vehicle so we don't count the same car twice.</p>
+                        <div class="code-block">DEBUG: Loaded model ANPR.pt for Number Plate Detection</div>
+                    </div>
+                </li>
+
+                <li class="flow-item">
+                    <div class="flow-number">3</div>
+                    <div class="flow-content">
+                        <h4>Trigger & OCR Detection</h4>
+                        <p>When a plate is found, the system sends a high-res crop to the OCR engine. If the plate matches Indian standards (Regex), it proceeds.</p>
+                        <div class="code-block">DEBUG: Valid Plate Result: MH12AB1234</div>
+                    </div>
+                </li>
+
+                <li class="flow-item">
+                    <div class="flow-number">4</div>
+                    <div class="flow-content">
+                        <h4>Evidence Persistence</h4>
+                        <p>The image is uploaded to R2 Cloud and the text is saved to our central SQL database for long-term storage.</p>
+                        <div class="code-block">DEBUG: SUCCESS! Saved to R2: pub-x.r2.dev/ANPR_123.jpg</div>
+                    </div>
+                </li>
+
+                <li class="flow-item">
+                    <div class="flow-number">5</div>
+                    <div class="flow-content">
+                        <h4>Web Feedback (UI)</h4>
+                        <p>The frontend browser receives a WebSocket event and updates the "Activity Log" instantly without refreshing the page.</p>
+                    </div>
+                </li>
+            </ul>
+        </div>
+
+        <div style="margin-top: 4rem; text-align: center;">
+            <h3>Brief Summary for Presentations</h3>
+            <p style="color: var(--text-dim); max-width: 800px; margin: 1.5rem auto;">
+                "3rdAI is an AI-powered surveillance platform that uses YOLOv8 neural networks to monitor traffic feeds in real-time. It automatically detects violations like missing helmets or seatbelts and performs Automatic Number Plate Recognition (ANPR). All incidents are securely logged to a cloud database with photographic evidence, providing a 100% automated enforcement workflow."
+            </p>
+        </div>
+
+        <footer>
+            &copy; 2026 3rdAI Video Analytics • Internal Documentation File
+        </footer>
+    </div>
+
+</body>
+</html>
