@@ -380,16 +380,41 @@ class LiveCameraProcessor:
         crops_dir = os.path.join("static", "crops", self.camera_id)
         os.makedirs(crops_dir, exist_ok=True)
         
+        print(f"[PROCESSOR] Started {self.camera_id} loop (Object ID: {id(self)})")
         while self.is_running:
             if self.raw_frame_buffer is None or self.raw_frame_buffer.size == 0:
                 time.sleep(0.01)
                 continue
             
+            # --- URGENT: RECORDING HEARTBEAT ---
+            if self.is_recording:
+                if self.frame_count % 30 == 0:
+                    print(f"[RECORDR-DEBUG] {self.camera_id} recording=True | Writer={self.video_writer is not None} | Frame={self.frame_count}")
+                    
+                if self.video_writer is None:
+                    try:
+                        h1, w1 = self.raw_frame_buffer.shape[:2]
+                        os.makedirs(os.path.dirname(self.recording_file_path), exist_ok=True)
+                        raw_path = self.recording_file_path.replace(".mp4", "_raw.avi")
+                        print(f"[RECORDR-DEBUG] Attempting VideoWriter: {raw_path} | Size: {w1}x{h1}")
+                        
+                        fourcc = cv2.VideoWriter_fourcc(*'MJPG')
+                        self.video_writer = cv2.VideoWriter(raw_path, fourcc, 20.0, (w1, h1))
+                        
+                        if self.video_writer.isOpened():
+                            print(f"[RECORDR-DEBUG] SUCCESS: VideoWriter opened at {raw_path}")
+                        else:
+                            print(f"[RECORDR-DEBUG] FAILURE: VideoWriter.isOpened() is False for {raw_path}")
+                    except Exception as e:
+                        print(f"[RECORDR-DEBUG] EXCEPTION during Writer opening: {e}")
+                
+                if self.video_writer and self.video_writer.isOpened():
+                    self.video_writer.write(self.raw_frame_buffer)
+            
+            # --- AI PROCESSING ---
             if self.frame_count % 100 == 0:
                 print(f"[PROCESSOR-HEARTBEAT] {self.camera_id} is active. Frame: {self.frame_count}")
             self.frame_count += 1
-            # Process every frame for high-quality visual detection boxes
-            pass # Skipping frame logic removed
 
             try:
                 frame = self.raw_frame_buffer
@@ -530,35 +555,6 @@ class LiveCameraProcessor:
                 print(f"[DEBUG] Error in processing loop: {e}")
                 time.sleep(0.1)
 
-            # --- RECORDING LOGIC (STABILIZED) ---
-            if self.is_recording and self.latest_frame is not None:
-                if self.video_writer is None:
-                    try:
-                        h1, w1 = self.latest_frame.shape[:2]
-                        # Ensure recording folder exists
-                        os.makedirs(os.path.dirname(self.recording_file_path), exist_ok=True)
-                        
-                        # Use MJPG for ULTIMATE compatibility on Linux servers
-                        raw_path = self.recording_file_path.replace(".mp4", "_raw.avi")
-                        print(f"[RECORDR] Starting VideoWriter (MJPG): {raw_path} | Size: {w1}x{h1} @ 20FPS")
-                        
-                        fourcc = cv2.VideoWriter_fourcc(*'MJPG') 
-                        self.video_writer = cv2.VideoWriter(raw_path, fourcc, 20.0, (w1, h1))
-                        
-                        if not self.video_writer.isOpened():
-                            print(f"[RECORDR] CRITICAL ERROR: MJPG failed. Trying XVID...")
-                            fourcc_fallback = cv2.VideoWriter_fourcc(*'XVID')
-                            self.video_writer = cv2.VideoWriter(raw_path, fourcc_fallback, 20.0, (w1, h1))
-                            
-                        if self.video_writer and self.video_writer.isOpened():
-                            print(f"[RECORDR] SUCCESS: Recording initialized with codec {fourcc}")
-                        else:
-                            print(f"[RECORDR] FATAL: All VideoWriter attempts (MJPG, XVID) failed.")
-                    except Exception as ve:
-                        print(f"[RECORDR] EXCEPTION in VideoWriter Setup: {ve}")
-                
-                if self.video_writer and self.video_writer.isOpened():
-                    self.video_writer.write(self.latest_frame)
     def start_recording(self, file_path, initiated_by="System", note=None, source="manual", analysis_session_id=None, recording_session_id=None):
         if self.is_recording:
             return False, "Already recording"
