@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 from utils.db import SessionLocal, Detection, Camera, RecordingSession, AnalysisSession
 from sqlalchemy.sql import func
 import torch
+from concurrent.futures import ThreadPoolExecutor
 
 # Load environment variables
 load_dotenv()
@@ -250,7 +251,8 @@ class LiveCameraProcessor:
         self.models = {t: get_model(t) for t in selected_triggers}
         self.vehicle_model = YOLO("yolov8n.pt").to(DEVICE)
         self.frame_count = 0
-        self.process_every_n_frames = 2 # Process every 2nd frame for speed
+        self.process_every_n_frames = 1 # Process every frame for high-speed tracking
+        self.executor = ThreadPoolExecutor(max_workers=10) # Heavy network tasks (OCR, R2) handled here
         
         self.latest_jpeg = None # Pre-encoded JPEG for WebSocket delivery
         self.cap = None
@@ -432,63 +434,74 @@ class LiveCameraProcessor:
                                 local_plate_path = None
                                 local_object_path = None
 
-                                if trigger_name == "Number Plate Detection":
-                                    plate_text = get_best_ocr(crop)
-                                    if plate_text and plate_text in self.seen_plate_numbers: continue
-                                    if plate_text: self.seen_plate_numbers.add(plate_text)
+                                # ONLY SUBMIT HEAVY NETWORK TASKS TO EXECUTOR
+                                def _async_anpr_task(a_crop, a_raw_frame, a_obj_id, a_trigger_name, a_box):
+                                    ax1, ay1, ax2, ay2 = a_box
+                                    a_plate_text = ""
+                                    a_v_color = "Unknown"
+                                    a_p_fname = f"{a_trigger_name.replace(' ', '_')}_{a_obj_id}_{int(time.time())}.jpg"
                                     
-                                    cv2.imwrite(os.path.join(crops_dir, p_fname), crop)
-                                    local_plate_path = f"/static/crops/{self.camera_id}/{p_fname}"
-                                    r2_plate_url = upload_to_r2(crop, trigger_name, p_fname)
+                                    # 1. OCR (Slow)
+                                    if a_trigger_name == "Number Plate Detection":
+                                        a_plate_text = get_best_ocr(a_crop)
+                                        if not a_plate_text: return # Skip if unreadable
+                                        if a_plate_text in self.seen_plate_numbers: return
+                                        self.seen_plate_numbers.add(a_plate_text)
                                     
-                                    # Find clear vehicle crop for the plate
-                                    v_res = self.vehicle_model.predict(raw_frame, verbose=False, classes=[2,3,5,7], conf=0.4, device=DEVICE)[0]
-                                    for v_box in v_res.boxes:
-                                        vx1, vy1, vx2, vy2 = map(int, v_box.xyxy[0])
-                                        px, py = (x1+x2)/2, (y1+y2)/2
-                                        if vx1 <= px <= vx2 and vy1 <= py <= vy2:
-                                            v_crop = raw_frame[vy1:vy2, vx1:vx2]
-                                            v_color = get_vehicle_color(v_crop)
-                                            v_fname = f"v_{obj_id}_{int(time.time())}.jpg"
-                                            cv2.imwrite(os.path.join(crops_dir, v_fname), v_crop)
-                                            local_object_path = f"/static/crops/{self.camera_id}/{v_fname}"
-                                            r2_object_url = upload_to_r2(v_crop, trigger_name, v_fname)
-                                            break
-                                else:
-                                    # For other objects (Helmet, etc.), just crop the object carefully
-                                    cv2.imwrite(os.path.join(crops_dir, p_fname), crop)
-                                    local_object_path = f"/static/crops/{self.camera_id}/{p_fname}"
-                                    r2_object_url = upload_to_r2(crop, trigger_name, p_fname)
+                                    # 2. Local Save
+                                    cv2.imwrite(os.path.join(crops_dir, a_p_fname), a_crop)
+                                    a_local_plate_path = f"/static/crops/{self.camera_id}/{a_p_fname}"
+                                    
+                                    # 3. R2 Upload (Slow)
+                                    a_r2_plate_url = upload_to_r2(a_crop, a_trigger_name, a_p_fname)
+                                    
+                                    a_r2_object_url = None
+                                    a_local_object_path = None
+                                    
+                                    if a_trigger_name == "Number Plate Detection":
+                                        # Find clear vehicle crop (Fast - GPU)
+                                        av_res = self.vehicle_model.predict(a_raw_frame, verbose=False, classes=[2,3,5,7], conf=0.4, device=DEVICE)[0]
+                                        for av_box in av_res.boxes:
+                                            avx1, avy1, avx2, avy2 = map(int, av_box.xyxy[0])
+                                            apx, apy = (ax1+ax2)/2, (ay1+ay2)/2
+                                            if avx1 <= apx <= avx2 and avy1 <= apy <= avy2:
+                                                av_crop = a_raw_frame[avy1:avy2, avx1:avx2]
+                                                a_v_color = get_vehicle_color(av_crop)
+                                                av_fname = f"v_{a_obj_id}_{int(time.time())}.jpg"
+                                                cv2.imwrite(os.path.join(crops_dir, av_fname), av_crop)
+                                                a_local_object_path = f"/static/crops/{self.camera_id}/{av_fname}"
+                                                a_r2_object_url = upload_to_r2(av_crop, a_trigger_name, av_fname)
+                                                break
+                                    else:
+                                        a_r2_object_url = a_r2_plate_url
+                                        a_local_object_path = a_local_plate_path
+
+                                    # 4. Final DB save and Log
+                                    a_save_data = {
+                                        "task_id": self.camera_id,
+                                        "filename": self.camera_link,
+                                        "timestamp": 0.0,
+                                        "trigger": a_trigger_name,
+                                        "event": f"Detection (ID: {a_obj_id})",
+                                        "image_plate_url": a_r2_plate_url,
+                                        "image_object_url": a_r2_object_url,
+                                        "plate_number": a_plate_text or None,
+                                        "vehicle_color": a_v_color if a_v_color != "Unknown" else None
+                                    }
+                                    save_to_db(a_save_data)
+                                    self.add_log(
+                                        a_trigger_name, 
+                                        f"Detected {a_trigger_name} (ID: {a_obj_id})",
+                                        plate=a_local_plate_path,
+                                        obj=a_local_object_path,
+                                        p_num=a_plate_text,
+                                        color=a_v_color,
+                                        r2=True if a_r2_plate_url or a_r2_object_url else False
+                                    )
 
                                 self.processed_track_ids.add(unique_track_key)
-                                
-                                save_data = {
-                                    "task_id": self.camera_id,
-                                    "filename": self.camera_link,
-                                    "timestamp": 0.0,
-                                    "trigger": trigger_name,
-                                    "event": f"Detection (ID: {obj_id})",
-                                    "image_plate_url": r2_plate_url,
-                                    "image_object_url": r2_object_url,
-                                    "plate_number": plate_text or None,
-                                    "vehicle_color": v_color if v_color != "Unknown" else None
-                                }
-                                
-                                # Only save and log if we actually got a clear detection (esp for plates)
-                                if trigger_name == "Number Plate Detection" and not plate_text:
-                                    continue
-                                
-                                save_to_db(save_data)
-                                
-                                self.add_log(
-                                    trigger_name, 
-                                    f"Detected {trigger_name} (ID: {obj_id})",
-                                    plate=local_plate_path,
-                                    obj=local_object_path,
-                                    p_num=plate_text,
-                                    color=v_color,
-                                    r2=True if r2_plate_url or r2_object_url else False
-                                )
+                                # RUN IN BACKGROUND
+                                self.executor.submit(_async_anpr_task, crop, raw_frame, obj_id, trigger_name, box)
 
                 self._update_latest_frame(frame)
                 
@@ -621,10 +634,6 @@ def process_video(task_id, input_path, output_path, selected_triggers):
         frame_count += 1
         frame = cv2.resize(frame, (width, height))
         
-        if frame_count % process_every_n != 0:
-            out.write(frame)
-            continue
-            
         raw_frame = frame.copy()
         for trigger_name, model in loaded_models.items():
             results = model.track(frame, persist=True, verbose=False, iou=0.5, conf=0.45, device=DEVICE)[0]
