@@ -534,16 +534,23 @@ class LiveCameraProcessor:
                         # Ensure recording folder exists
                         os.makedirs(os.path.dirname(self.recording_file_path), exist_ok=True)
                         
-                        raw_path = self.recording_file_path.replace(".mp4", "_raw.mp4")
-                        print(f"[RECORDR] Starting VideoWriter: {raw_path} | Size: {w1}x{h1}")
+                        # Use AVI/XVID for maximum compatibility during raw capture on Linux
+                        raw_path = self.recording_file_path.replace(".mp4", "_raw.avi")
+                        print(f"[RECORDR] Starting VideoWriter (XVID): {raw_path} | Size: {w1}x{h1} @ 20FPS")
                         
-                        fourcc = cv2.VideoWriter_fourcc(*'mp4v') # High compatibility for Linux/Win
+                        fourcc = cv2.VideoWriter_fourcc(*'XVID') 
                         self.video_writer = cv2.VideoWriter(raw_path, fourcc, 20.0, (w1, h1))
                         
                         if not self.video_writer.isOpened():
-                            print(f"[RECORDR] ERROR: VideoWriter failed to open raw_path: {raw_path}")
+                            print(f"[RECORDR] CRITICAL ERROR: VideoWriter (XVID) failed to open: {raw_path}")
+                            # Fallback attempt with mp4v if XVID failed
+                            fourcc_fallback = cv2.VideoWriter_fourcc(*'mp4v')
+                            self.video_writer = cv2.VideoWriter(raw_path, fourcc_fallback, 20.0, (w1, h1))
+                            
+                        if self.video_writer.isOpened():
+                            print(f"[RECORDR] SUCCESS: Recording initialized.")
                         else:
-                            print(f"[RECORDR] SUCCESS: Recording started at {raw_path}")
+                            print(f"[RECORDR] FATAL: All VideoWriter attempts failed.")
                     except Exception as ve:
                         print(f"[RECORDR] EXCEPTION in VideoWriter Setup: {ve}")
                 
@@ -593,17 +600,22 @@ class LiveCameraProcessor:
             # Start transcoding AND R2 Upload in a BACKGROUND THREAD
             import threading
             def _bg_finalize_recording():
-                if os.path.exists(raw_path):
-                    print(f"[RECORDR-BG] Starting background transcode: {raw_path}")
+                # Check for both possible raw extensions (.mp4 or .avi)
+                raw_path_avi = self.recording_file_path.replace(".mp4", "_raw.avi")
+                raw_path_mp4 = self.recording_file_path.replace(".mp4", "_raw.mp4")
+                actual_raw = raw_path_avi if os.path.exists(raw_path_avi) else (raw_path_mp4 if os.path.exists(raw_path_mp4) else None)
+
+                if actual_raw:
+                    print(f"[RECORDR-BG] Finalizing raw file: {actual_raw}")
                     try:
-                        # 1. Transcode to H.264 for browser playback
-                        cmd = ['ffmpeg', '-y', '-i', raw_path, '-c:v', 'libx264', '-crf', '28', '-preset', 'ultrafast', '-movflags', '+faststart', '-pix_fmt', 'yuv420p', out_path]
+                        # 1. Transcode to H.264 (MP4) for browser playback
+                        cmd = ['ffmpeg', '-y', '-i', actual_raw, '-c:v', 'libx264', '-crf', '28', '-preset', 'ultrafast', '-movflags', '+faststart', '-pix_fmt', 'yuv420p', out_path]
                         subprocess.run(cmd, check=True, timeout=300, capture_output=True)
                         
                         r2_url = None
                         if os.path.exists(out_path):
-                            print(f"[RECORDR-BG] Finalized: {out_path}")
-                            if os.path.exists(raw_path): os.remove(raw_path)
+                            print(f"[RECORDR-BG] Finalization Success: {out_path}")
+                            if os.path.exists(actual_raw): os.remove(actual_raw)
                             
                             # 2. Upload to R2 if configured
                             try:
@@ -617,9 +629,9 @@ class LiveCameraProcessor:
                             except Exception as re:
                                 print(f"[RECORDR-BG] R2 upload error: {re}")
                     except Exception as fe:
-                        print(f"[RECORDR-BG] Transcode error: {fe}")
-                        if not os.path.exists(out_path) and os.path.exists(raw_path):
-                            os.rename(raw_path, out_path)
+                        print(f"[RECORDR-BG] Finalization Error: {fe}")
+                        if not os.path.exists(out_path) and actual_raw and os.path.exists(actual_raw):
+                            os.rename(actual_raw, out_path)
                 
                 # 3. Update Database using SessionLocal
                 try:
