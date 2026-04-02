@@ -398,6 +398,10 @@ class LiveCameraProcessor:
                     frame = cv2.resize(frame, (1280, int(h * (1280/w))))
                 raw_frame = frame.copy()
                 
+                # --- UPDATE LATEST FRAME (FOR RECORDING AND STREAMING) ---
+                # Critical: This must be outside any conditional or track loops
+                self._update_latest_frame(frame)
+                
                 # --- GENERAL YOLO DETECTION (For Visual Feedback) ---
                 # Expand to all relevant classes: 0:person, 1:bicycle, 2:car, 3:motorcycle, 5:bus, 7:truck
                 v_results = self.vehicle_model.predict(frame, verbose=False, classes=[0, 1, 2, 3, 5, 7], conf=0.3, device=DEVICE)[0]
@@ -521,8 +525,6 @@ class LiveCameraProcessor:
                                 self.processed_track_ids.add(unique_track_key)
                                 # RUN IN BACKGROUND
                                 self.executor.submit(_async_anpr_task, crop, raw_frame, obj_id, trigger_name, box)
-
-                self._update_latest_frame(frame)
                 
             except Exception as e:
                 print(f"[DEBUG] Error in processing loop: {e}")
