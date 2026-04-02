@@ -385,6 +385,8 @@ class LiveCameraProcessor:
                 time.sleep(0.01)
                 continue
             
+            if self.frame_count % 100 == 0:
+                print(f"[PROCESSOR-HEARTBEAT] {self.camera_id} is active. Frame: {self.frame_count}")
             self.frame_count += 1
             # Process every frame for high-quality visual detection boxes
             pass # Skipping frame logic removed
@@ -534,23 +536,22 @@ class LiveCameraProcessor:
                         # Ensure recording folder exists
                         os.makedirs(os.path.dirname(self.recording_file_path), exist_ok=True)
                         
-                        # Use AVI/XVID for maximum compatibility during raw capture on Linux
+                        # Use MJPG for ULTIMATE compatibility on Linux servers
                         raw_path = self.recording_file_path.replace(".mp4", "_raw.avi")
-                        print(f"[RECORDR] Starting VideoWriter (XVID): {raw_path} | Size: {w1}x{h1} @ 20FPS")
+                        print(f"[RECORDR] Starting VideoWriter (MJPG): {raw_path} | Size: {w1}x{h1} @ 20FPS")
                         
-                        fourcc = cv2.VideoWriter_fourcc(*'XVID') 
+                        fourcc = cv2.VideoWriter_fourcc(*'MJPG') 
                         self.video_writer = cv2.VideoWriter(raw_path, fourcc, 20.0, (w1, h1))
                         
                         if not self.video_writer.isOpened():
-                            print(f"[RECORDR] CRITICAL ERROR: VideoWriter (XVID) failed to open: {raw_path}")
-                            # Fallback attempt with mp4v if XVID failed
-                            fourcc_fallback = cv2.VideoWriter_fourcc(*'mp4v')
+                            print(f"[RECORDR] CRITICAL ERROR: MJPG failed. Trying XVID...")
+                            fourcc_fallback = cv2.VideoWriter_fourcc(*'XVID')
                             self.video_writer = cv2.VideoWriter(raw_path, fourcc_fallback, 20.0, (w1, h1))
                             
-                        if self.video_writer.isOpened():
-                            print(f"[RECORDR] SUCCESS: Recording initialized.")
+                        if self.video_writer and self.video_writer.isOpened():
+                            print(f"[RECORDR] SUCCESS: Recording initialized with codec {fourcc}")
                         else:
-                            print(f"[RECORDR] FATAL: All VideoWriter attempts failed.")
+                            print(f"[RECORDR] FATAL: All VideoWriter attempts (MJPG, XVID) failed.")
                     except Exception as ve:
                         print(f"[RECORDR] EXCEPTION in VideoWriter Setup: {ve}")
                 
