@@ -111,8 +111,13 @@ def save_to_db(data):
 os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
 
 # PLATE RECOGNIZER CLOUD API CONFIGURATION
-PLATE_RECOGNIZER_TOKEN = "4c4ed26b9a36848a897178aca57d428ec3358ed7"
+PLATE_RECOGNIZER_TOKEN = "534729b5959406652714ba00f6271c75716b6249"
 PLATE_RECOGNIZER_URL = 'https://api.platerecognizer.com/v1/plate-reader/'
+
+# GLOBAL RATE LIMITER (Stay within 1 req/sec limit)
+import threading
+last_api_call_time = 0.0
+api_lock = threading.Lock()
 
 # DEVICE DETECTION (GPU vs CPU)
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -185,24 +190,36 @@ def is_valid_indian_plate(plate_text):
 def get_best_ocr(crop_img):
     if crop_img is None or crop_img.size == 0:
         return ""
+    global last_api_call_time
     try:
-        _, buffer = cv2.imencode('.jpg', crop_img, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
-        img_bytes = buffer.tobytes()
-        response = requests.post(PLATE_RECOGNIZER_URL,
-            data=dict(regions=['in']),
-            files=dict(upload=('plate.jpg', img_bytes)),
-            headers={'Authorization': f'Token {PLATE_RECOGNIZER_TOKEN}'},
-            timeout=10)
-        if response.status_code in [200, 201]:
-            res_data = response.json()
-            if res_data.get('results'):
-                plate_text = res_data['results'][0].get('plate', '').upper()
-                clean_text = re.sub(r'[^A-Z0-9]', '', plate_text)
-                if is_valid_indian_plate(clean_text):
-                    print(f"Debug: Valid Plate Recognizer Result: {clean_text}")
-                    return clean_text
-        else:
-            print(f"Debug: Plate Recognizer API Error: {response.status_code}")
+        # --- GLOBAL RATE LIMIT ENFORCEMENT ---
+        with api_lock:
+            now = time.time()
+            elapsed = now - last_api_call_time
+            if elapsed < 1.1: # Stay below 1 req/sec
+                time.sleep(1.1 - elapsed)
+            last_api_call_time = time.time()
+
+            _, buffer = cv2.imencode('.jpg', crop_img, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
+            img_bytes = buffer.tobytes()
+            response = requests.post(PLATE_RECOGNIZER_URL,
+                data=dict(regions=['in']),
+                files=dict(upload=('plate.jpg', img_bytes)),
+                headers={'Authorization': f'Token {PLATE_RECOGNIZER_TOKEN}'},
+                timeout=10)
+                
+            if response.status_code in [200, 201]:
+                res_data = response.json()
+                if res_data.get('results'):
+                    plate_text = res_data['results'][0].get('plate', '').upper()
+                    clean_text = re.sub(r'[^A-Z0-9]', '', plate_text)
+                    if is_valid_indian_plate(clean_text):
+                        print(f"DEBUG: [CLOUD] Plate Found: {clean_text}")
+                        return clean_text
+            elif response.status_code == 429:
+                print("DEBUG: [LIMIT] Cloud API rate limit hit! Switching to Local OCR...")
+            else:
+                print(f"Debug: Plate Recognizer API Error: {response.status_code}")
     except Exception as e:
         print(f"Debug: Plate Recognizer API Connection Error: {e}")
     try:
