@@ -372,6 +372,16 @@ class LiveCameraProcessor:
                     frame = cv2.resize(frame, (1280, int(h * (1280/w))))
                 raw_frame = frame.copy()
                 
+                # --- GENERAL VEHICLE DETECTION (For Visual Feedback) ---
+                v_results = self.vehicle_model.predict(frame, verbose=False, classes=[2, 3, 5, 7], conf=0.35)[0]
+                if v_results.boxes is not None:
+                    for v_box in v_results.boxes:
+                        vx1, vy1, vx2, vy2 = map(int, v_box.xyxy[0])
+                        v_conf = float(v_box.conf[0])
+                        # Strong Green Box for all vehicles
+                        cv2.rectangle(frame, (vx1, vy1), (vx2, vy2), (0, 255, 0), 2)
+                        cv2.putText(frame, f"Vehicle {v_conf:.2f}", (vx1, vy1-10), 0, 0.5, (0, 255, 0), 2)
+
                 for trigger_name, model in self.models.items():
                     if model is None: continue
                     results = model.track(frame, persist=True, verbose=False, iou=0.5, conf=0.4)[0]
