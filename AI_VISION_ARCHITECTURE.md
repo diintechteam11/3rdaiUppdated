@@ -10,9 +10,10 @@ This document explains the "Intelligence" behind the 3rdAI platform. It is desig
 YOLO stands for **"You Only Look Once"**. It is a **one-stage object detector**. Older techniques like R-CNN had two stages (find potential regions, then classify them), which were slow. YOLO looks at the entire image in a single pass and predicts bounding boxes and classes simultaneously.
 
 ### Why YOLOv8 for this project?
-1.  **Extreme Speed**: YOLOv8n (Nano) can process frames in under 10ms, making it real-time.
+1.  **Extreme Speed**: YOLOv8n (Nano) processed on your **NVIDIA A10 GPU** can handle frames in under 2ms, making it blazing fast.
 2.  **Tracking Capabilities**: It doesn't just detect; it includes a built-in tracker (`model.track()`) that gives each vehicle a persistent ID across frames.
 3.  **Modular Flexibility**: We can load specialized models (Helmet, Plate, Seatbelt) into the same pipeline without changing the core engine.
+4.  **GPU Acceleration**: The system now automatically detects your CUDA-enabled hardware to offload all heavy AI math to the GPU cores.
 
 ---
 

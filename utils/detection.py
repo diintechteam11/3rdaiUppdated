@@ -12,6 +12,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 from utils.db import SessionLocal, Detection, Camera, RecordingSession, AnalysisSession
 from sqlalchemy.sql import func
+import torch
 
 # Load environment variables
 load_dotenv()
@@ -111,6 +112,12 @@ os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
 # PLATE RECOGNIZER CLOUD API CONFIGURATION
 PLATE_RECOGNIZER_TOKEN = "4c4ed26b9a36848a897178aca57d428ec3358ed7"
 PLATE_RECOGNIZER_URL = 'https://api.platerecognizer.com/v1/plate-reader/'
+
+# DEVICE DETECTION (GPU vs CPU)
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+print(f"DEBUG: SYSTEM INITIALIZING ON DEVICE: {DEVICE.upper()}")
+if DEVICE == "cuda":
+    print(f"DEBUG: GPU DETECTED! Found {torch.cuda.device_count()} GPUs. Using primary device: {torch.cuda.get_device_name(0)}")
 
 # OCR INITIALIZATION
 try:
@@ -221,8 +228,8 @@ def get_model(trigger_name):
         if not os.path.exists(model_path):
             model_path = "yolov8n.pt"
         try:
-            _loaded_models_cache[cache_key] = YOLO(model_path)
-            print(f"Debug: Loaded model {model_filename} for {trigger_name}")
+            _loaded_models_cache[cache_key] = YOLO(model_path).to(DEVICE)
+            print(f"Debug: Loaded model {model_filename} on {DEVICE} for {trigger_name}")
         except Exception as e:
             print(f"Debug: Error loading model {model_filename}: {e}")
             return None
@@ -241,7 +248,7 @@ class LiveCameraProcessor:
         self.processed_track_ids = set()
         self.seen_plate_numbers = set()
         self.models = {t: get_model(t) for t in selected_triggers}
-        self.vehicle_model = YOLO("yolov8n.pt")
+        self.vehicle_model = YOLO("yolov8n.pt").to(DEVICE)
         self.frame_count = 0
         self.process_every_n_frames = 2 # Process every 2nd frame for speed
         
@@ -372,7 +379,7 @@ class LiveCameraProcessor:
                 
                 # --- GENERAL YOLO DETECTION (For Visual Feedback) ---
                 # Expand to all relevant classes: 0:person, 1:bicycle, 2:car, 3:motorcycle, 5:bus, 7:truck
-                v_results = self.vehicle_model.predict(frame, verbose=False, classes=[0, 1, 2, 3, 5, 7], conf=0.3)[0]
+                v_results = self.vehicle_model.predict(frame, verbose=False, classes=[0, 1, 2, 3, 5, 7], conf=0.3, device=DEVICE)[0]
                 if v_results.boxes is not None:
                     for v_box in v_results.boxes:
                         vx1, vy1, vx2, vy2 = map(int, v_box.xyxy[0])
@@ -385,7 +392,7 @@ class LiveCameraProcessor:
 
                 for trigger_name, model in self.models.items():
                     if model is None: continue
-                    results = model.track(frame, persist=True, verbose=False, iou=0.5, conf=0.4)[0]
+                    results = model.track(frame, persist=True, verbose=False, iou=0.5, conf=0.4, device=DEVICE)[0]
                     
                     if results.boxes.id is not None:
                         boxes = results.boxes.xyxy.cpu().numpy().astype(int)
@@ -435,7 +442,7 @@ class LiveCameraProcessor:
                                     r2_plate_url = upload_to_r2(crop, trigger_name, p_fname)
                                     
                                     # Find clear vehicle crop for the plate
-                                    v_res = self.vehicle_model.predict(raw_frame, verbose=False, classes=[2,3,5,7], conf=0.4)[0]
+                                    v_res = self.vehicle_model.predict(raw_frame, verbose=False, classes=[2,3,5,7], conf=0.4, device=DEVICE)[0]
                                     for v_box in v_res.boxes:
                                         vx1, vy1, vx2, vy2 = map(int, v_box.xyxy[0])
                                         px, py = (x1+x2)/2, (y1+y2)/2
@@ -583,7 +590,7 @@ def process_video(task_id, input_path, output_path, selected_triggers):
     os.makedirs(crops_dir, exist_ok=True)
     
     loaded_models = {t: get_model(t) for t in selected_triggers if get_model(t)}
-    vehicle_model = YOLO("yolov8n.pt")
+    vehicle_model = YOLO("yolov8n.pt").to(DEVICE)
     
     cap = cv2.VideoCapture(input_path)
     if not cap.isOpened():
@@ -620,7 +627,7 @@ def process_video(task_id, input_path, output_path, selected_triggers):
             
         raw_frame = frame.copy()
         for trigger_name, model in loaded_models.items():
-            results = model.track(frame, persist=True, verbose=False, iou=0.5, conf=0.45)[0]
+            results = model.track(frame, persist=True, verbose=False, iou=0.5, conf=0.45, device=DEVICE)[0]
             
             if results.boxes.id is not None:
                 boxes = results.boxes.xyxy.cpu().numpy().astype(int)
@@ -669,7 +676,7 @@ def process_video(task_id, input_path, output_path, selected_triggers):
                             r2_plate_url = upload_to_r2(crop, trigger_name, p_fname)
                             
                             # Find matching vehicle
-                            v_res = vehicle_model.predict(raw_frame, verbose=False, classes=[2,3,5,7], conf=0.4)[0]
+                            v_res = vehicle_model.predict(raw_frame, verbose=False, classes=[2,3,5,7], conf=0.4, device=DEVICE)[0]
                             for v_box in v_res.boxes:
                                 vx1, vy1, vx2, vy2 = map(int, v_box.xyxy[0])
                                 px, py = (x1+x2)/2, (y1+y2)/2
