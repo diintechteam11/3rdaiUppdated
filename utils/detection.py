@@ -360,10 +360,8 @@ class LiveCameraProcessor:
                 continue
             
             self.frame_count += 1
-            if self.frame_count % self.process_every_n_frames != 0:
-                # Update latest frame for streaming but skip heavy AI
-                self._update_latest_frame(self.raw_frame_buffer)
-                continue
+            # Process every frame for high-quality visual detection boxes
+            pass # Skipping frame logic removed
 
             try:
                 frame = self.raw_frame_buffer
@@ -372,15 +370,18 @@ class LiveCameraProcessor:
                     frame = cv2.resize(frame, (1280, int(h * (1280/w))))
                 raw_frame = frame.copy()
                 
-                # --- GENERAL VEHICLE DETECTION (For Visual Feedback) ---
-                v_results = self.vehicle_model.predict(frame, verbose=False, classes=[2, 3, 5, 7], conf=0.35)[0]
+                # --- GENERAL YOLO DETECTION (For Visual Feedback) ---
+                # Expand to all relevant classes: 0:person, 1:bicycle, 2:car, 3:motorcycle, 5:bus, 7:truck
+                v_results = self.vehicle_model.predict(frame, verbose=False, classes=[0, 1, 2, 3, 5, 7], conf=0.3)[0]
                 if v_results.boxes is not None:
                     for v_box in v_results.boxes:
                         vx1, vy1, vx2, vy2 = map(int, v_box.xyxy[0])
                         v_conf = float(v_box.conf[0])
-                        # Strong Green Box for all vehicles
+                        v_cls = int(v_box.cls[0])
+                        v_name = self.vehicle_model.names.get(v_cls, "Object")
+                        # Draw Persistent Green Box
                         cv2.rectangle(frame, (vx1, vy1), (vx2, vy2), (0, 255, 0), 2)
-                        cv2.putText(frame, f"Vehicle {v_conf:.2f}", (vx1, vy1-10), 0, 0.5, (0, 255, 0), 2)
+                        cv2.putText(frame, f"{v_name} {v_conf:.2f}", (vx1, vy1-10), 0, 0.5, (0, 255, 0), 2)
 
                 for trigger_name, model in self.models.items():
                     if model is None: continue
