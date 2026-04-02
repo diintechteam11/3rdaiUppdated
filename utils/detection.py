@@ -382,6 +382,7 @@ class LiveCameraProcessor:
                         confs = results.boxes.conf.cpu().numpy()
                         
                         for box, obj_id, conf in zip(boxes, ids, confs):
+                            print(f"DEBUG: [LIVE] YOLOv8 {trigger_name} detected ID:{obj_id} (Conf: {conf:.2f})")
                             x1, y1, x2, y2 = box
                             unique_track_key = f"{trigger_name}_{obj_id}"
                             
@@ -616,6 +617,7 @@ def process_video(task_id, input_path, output_path, selected_triggers):
                 confs = results.boxes.conf.cpu().numpy()
                 
                 for box, obj_id, conf in zip(boxes, ids, confs):
+                    print(f"DEBUG: [VIDEO] YOLOv8 {trigger_name} detected ID:{obj_id} (Conf: {conf:.2f})")
                     x1, y1, x2, y2 = box
                     unique_track_key = f"{trigger_name}_{obj_id}"
                     
