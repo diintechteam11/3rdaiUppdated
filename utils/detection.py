@@ -386,7 +386,35 @@ class LiveCameraProcessor:
                 time.sleep(0.01)
                 continue
             
-            # --- URGENT: RECORDING HEARTBEAT ---
+            # --- DB SYNC (FOR MULTI-PROCESS SYSTEMS) ---
+            # Every 100 frames, double-check if we should be recording according to the DB
+            if self.frame_count % 100 == 0:
+                print(f"[PROCESSOR-HEARTBEAT] {self.camera_id} active. Frame: {self.frame_count} | Capturing: {self.is_recording}")
+                try:
+                    from utils.db import SessionLocal, Camera, RecordingSession
+                    from sqlalchemy import desc
+                    tdb = SessionLocal()
+                    cam_rec = tdb.query(Camera).filter(Camera.id == self.camera_id).first()
+                    
+                    if cam_rec:
+                        if cam_rec.is_recording and not self.is_recording:
+                            # Auto-Sync Start
+                            print(f"[RECORDR-SYNC] Auto-Start detected from DB for {self.camera_id}")
+                            sess = tdb.query(RecordingSession).filter(RecordingSession.camera_id == self.camera_id, RecordingSession.stopped_at == None).order_by(desc(RecordingSession.started_at)).first()
+                            if sess:
+                                auto_name = f"{sess.video_name}_{int(time.time())}.mp4"
+                                out_path = os.path.join("static", "recordings", self.camera_id, sess.video_name) # sess.video_name is already the filename
+                                self.start_recording(file_path=out_path, recording_session_id=sess.id)
+                        
+                        elif not cam_rec.is_recording and self.is_recording:
+                            # Auto-Sync Stop
+                            print(f"[RECORDR-SYNC] Auto-Stop detected from DB for {self.camera_id}")
+                            self.stop_recording()
+                    tdb.close()
+                except Exception as de:
+                    print(f"[RECORDR-SYNC] DB Query Error: {de}")
+
+            # --- URGENT: CAPTURE LOGIC ---
             if self.is_recording:
                 if self.frame_count % 30 == 0:
                     print(f"[RECORDR-DEBUG] {self.camera_id} recording=True | Writer={self.video_writer is not None} | Frame={self.frame_count}")

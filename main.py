@@ -378,6 +378,10 @@ async def start_recording(camera_id: str, body: StartRecordingBody, db: Session 
     cam.status = "recording"
     db.commit()
 
+    # Object ID logging to detect process isolation bugs
+    p_obj = camera_processes.get(camera_id, {}).get("processor")
+    print(f"[API-RECORD] Start requested for {camera_id}. Processor ID: {id(p_obj) if p_obj else 'None'}")
+
     # Also kick off live processor if camera is in camera_processes
     if camera_id in camera_processes:
         recording_path = str(RECORDINGS_DIR / camera_id / auto_name)
@@ -395,6 +399,7 @@ async def start_recording(camera_id: str, body: StartRecordingBody, db: Session 
         "status": "recording",
         "started_at": iso(now),
         "initiated_by": body.initiated_by,
+        "debug_id": id(p_obj) if p_obj else 0
     }
 
 
