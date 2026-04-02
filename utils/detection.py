@@ -576,6 +576,8 @@ class LiveCameraProcessor:
             self.is_recording = False
             raw_path = self.recording_file_path.replace(".mp4", "_raw.mp4")
             out_path = self.recording_file_path
+            rec_id = self.recording_session_id
+            cam_id = self.camera_id
             
             if self.video_writer:
                 self.video_writer.release()
@@ -583,26 +585,58 @@ class LiveCameraProcessor:
             
             duration = int(time.time() - self.recording_start_time) if self.recording_start_time else 0
             
-            # Start transcoding in a BACKGROUND THREAD to prevent API blocking
+            # Start transcoding AND R2 Upload in a BACKGROUND THREAD
             import threading
-            def _bg_transcode():
+            def _bg_finalize_recording():
                 if os.path.exists(raw_path):
                     print(f"[RECORDR-BG] Starting background transcode: {raw_path}")
                     try:
+                        # 1. Transcode to H.264 for browser playback
                         cmd = ['ffmpeg', '-y', '-i', raw_path, '-c:v', 'libx264', '-crf', '28', '-preset', 'ultrafast', '-movflags', '+faststart', '-pix_fmt', 'yuv420p', out_path]
-                        subprocess.run(cmd, check=True, timeout=120, capture_output=True)
+                        subprocess.run(cmd, check=True, timeout=300, capture_output=True)
+                        
+                        r2_url = None
                         if os.path.exists(out_path):
                             print(f"[RECORDR-BG] Finalized: {out_path}")
                             if os.path.exists(raw_path): os.remove(raw_path)
+                            
+                            # 2. Upload to R2 if configured
+                            try:
+                                v_name = os.path.basename(out_path)
+                                # We need r2 utils but avoid circular imports
+                                from utils.r2 import upload_video_to_r2, build_r2_key
+                                r2_key = f"recordings/{cam_id}/{v_name}"
+                                r2_url = upload_video_to_r2(out_path, r2_key)
+                                if r2_url:
+                                    print(f"[RECORDR-BG] R2 Upload Success: {r2_url}")
+                            except Exception as re:
+                                print(f"[RECORDR-BG] R2 upload error: {re}")
                     except Exception as fe:
                         print(f"[RECORDR-BG] Transcode error: {fe}")
-                        if not os.path.exists(out_path): os.rename(raw_path, out_path)
-                else:
-                    print(f"[RECORDR-BG] Error: Raw file missing for transcode: {raw_path}")
+                        if not os.path.exists(out_path) and os.path.exists(raw_path):
+                            os.rename(raw_path, out_path)
+                
+                # 3. Update Database using SessionLocal
+                try:
+                    from utils.db import SessionLocal, RecordingSession
+                    db = SessionLocal()
+                    rec = db.query(RecordingSession).filter(RecordingSession.id == rec_id).first()
+                    if rec:
+                        rec.stopped_at = func.now()
+                        rec.saved_at = func.now()
+                        rec.duration_secs = duration
+                        rec.stopped_by = stopped_by
+                        if r2_url:
+                            rec.file_path = r2_url
+                        db.commit()
+                        print(f"[RECORDR-BG] DB Updated for session {rec_id}")
+                    db.close()
+                except Exception as de:
+                    print(f"[RECORDR-BG] DB update error: {de}")
 
-            threading.Thread(target=_bg_transcode, daemon=True).start()
+            threading.Thread(target=_bg_finalize_recording, daemon=True).start()
 
-            self.add_log("Recording", f"Stopped recording. Duration: {duration}s. Transcoding in background...", r2=False)
+            self.add_log("Recording", f"Stopped recording. Duration: {duration}s. Processing in background...", r2=False)
             return True, self.recording_session_id
         except Exception as e:
             print(f"Error stopping recording: {e}")

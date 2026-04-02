@@ -409,33 +409,12 @@ async def stop_recording(camera_id: str, body: StopRecordingBody, db: Session = 
     now = utc_now()
     duration = int((now - session.started_at.replace(tzinfo=timezone.utc)).total_seconds()) if session.started_at else 0
 
-    # Retrieve the path saved at START
-    stored_path = session.file_path.split("/")[-1] if session.file_path else None
-    auto_name = stored_path or _auto_filename(cam.name)
-    video_name = body.name or auto_name
-
-    r2_path = None
-    local_path = RECORDINGS_DIR / camera_id / auto_name
-    
-    # Give it a small delay for processor to finish transcoding if possible
-    # In a production app, R2 upload should be done in BackgroundTasks
-    if not local_path.exists():
-        time.sleep(1) # Wait for ffmpeg to finish its 1-second burst if it's ultrafast
-
-    if local_path.exists():
-        try:
-            key = build_r2_key(cam.name, video_name)
-            r2_path = upload_video_to_r2(str(local_path), key)
-        except Exception as e:
-            print(f"R2 upload failed: {e}")
-
     session.stopped_at = now
     session.saved_at = now
     session.duration_secs = duration
     session.stopped_by = body.stopped_by
-    session.video_name = video_name
-    if r2_path:
-        session.file_path = r2_path
+    if body.name:
+        session.video_name = body.name
     if body.description:
         session.description = body.description
 
@@ -449,7 +428,7 @@ async def stop_recording(camera_id: str, body: StopRecordingBody, db: Session = 
     return {
         "recording_id": session.id,
         "camera_id": camera_id,
-        "video_name": video_name,
+        "video_name": session.video_name,
         "file_path": session.file_path,
         "duration_secs": duration,
         "started_at": iso(session.started_at),
@@ -848,19 +827,12 @@ async def analysis_stop(camera_id: str, body: AnalysisStopBody, db: Session = De
 
         r2_path = None
         local_path = RECORDINGS_DIR / camera_id / auto_name
-        if local_path.exists():
-            try:
-                key = build_r2_key(cam.name, video_name)
-                r2_path = upload_video_to_r2(str(local_path), key)
-            except Exception as e:
-                print(f"R2 upload failed: {e}")
-
         rec.stopped_at = now
         rec.saved_at = now
         rec.duration_secs = duration
         rec.stopped_by = body.stopped_by
-        rec.video_name = video_name
-        rec.file_path = r2_path or f"/static/recordings/{camera_id}/{auto_name}"
+        if body.video_name:
+            rec.video_name = body.video_name
 
     analysis.capture_ended_at = now
     analysis.stopped_by = body.stopped_by
