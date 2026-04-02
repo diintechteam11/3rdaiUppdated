@@ -36,6 +36,7 @@ def _migrate_db():
         # Add updated_at / created_at if missing
         "ALTER TABLE recording_sessions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();",
         "ALTER TABLE cameras ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();",
+        "ALTER TABLE detections ADD COLUMN IF NOT EXISTS analysis_session_id VARCHAR(255);",
     ]
     with engine.connect() as conn:
         for sql in migrations:
@@ -378,14 +379,12 @@ async def start_recording(camera_id: str, body: StartRecordingBody, db: Session 
     cam.status = "recording"
     db.commit()
 
-    # Object ID logging to detect process isolation bugs
-    p_obj = camera_processes.get(camera_id, {}).get("processor")
-    print(f"[API-RECORD] Start requested for {camera_id}. Processor ID: {id(p_obj) if p_obj else 'None'}")
-
     # Also kick off live processor if camera is in camera_processes
     if camera_id in camera_processes:
         recording_path = str(RECORDINGS_DIR / camera_id / auto_name)
-        camera_processes[camera_id]["processor"].start_recording(
+        p_obj = camera_processes[camera_id]["processor"]
+        print(f"[API-RECORD] Start requested for {camera_id}. Processor ID: {id(p_obj)}")
+        p_obj.start_recording(
             file_path=recording_path, 
             initiated_by=body.initiated_by, 
             note=body.note, 
@@ -634,6 +633,7 @@ def _fmt_detection(d: Detection) -> dict:
 async def list_detections(
     camera_id: Optional[str] = None,
     task_id: Optional[str] = None,
+    analysis_id: Optional[str] = None,
     trigger: Optional[str] = None,
     page: int = 1,
     page_size: int = 50,
@@ -643,10 +643,11 @@ async def list_detections(
     """General detection query endpoint."""
     page_size = min(page_size, 200)
     q = db.query(Detection)
-    # Both camera_id and task_id filters map to the task_id column
     target_id = camera_id or task_id
     if target_id:
         q = q.filter(Detection.task_id == target_id)
+    if analysis_id:
+        q = q.filter(Detection.analysis_session_id == analysis_id)
     if trigger:
         q = q.filter(Detection.trigger == trigger)
     q = q.order_by(desc(Detection.created_at))
@@ -658,6 +659,7 @@ async def list_detections(
 @app.get("/api/v1/cameras/{camera_id}/detections")
 async def list_camera_detections(
     camera_id: str,
+    analysis_id: Optional[str] = None,
     trigger: Optional[str] = None,
     page: int = 1,
     page_size: int = 50,
@@ -665,7 +667,7 @@ async def list_camera_detections(
     _key=Depends(require_api_key),
 ):
     """Shorthand for camera-specific detections."""
-    return await list_detections(camera_id=camera_id, trigger=trigger, page=page, page_size=page_size, db=db, _key=_key)
+    return await list_detections(camera_id=camera_id, analysis_id=analysis_id, trigger=trigger, page=page, page_size=page_size, db=db, _key=_key)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -805,7 +807,6 @@ async def analysis_start(camera_id: str, body: AnalysisStartBody, db: Session = 
     db.commit()
 
     if camera_id in camera_processes:
-        auto_name = _auto_filename(cam.name)
         recording_path = str(RECORDINGS_DIR / camera_id / auto_name)
         camera_processes[camera_id]["processor"].start_recording(
             file_path=recording_path, 

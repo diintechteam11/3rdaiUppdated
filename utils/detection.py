@@ -555,6 +555,7 @@ class LiveCameraProcessor:
                                     # 4. Final DB save and Log
                                     a_save_data = {
                                         "task_id": self.camera_id,
+                                        "analysis_session_id": self.analysis_session_id,
                                         "filename": self.camera_link,
                                         "timestamp": 0.0,
                                         "trigger": a_trigger_name,
