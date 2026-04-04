@@ -671,15 +671,50 @@ async function loadAnalysisSessions() {
             <svg class="w-3 h-3 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
             📊 View Detection Feed
           </button>
+          ${!s.capture_ended_at ? 
+            `<button class="btn-success text-xs px-3 py-1" onclick="viewLiveStreamForAnalysis('${s.camera_id}')">
+              📡 View Live Stream
+             </button>` : ''}
           ${s.recording_session_id
             ? `<button class="btn-warn text-xs px-3 py-1" onclick="loadRecordingForSession('${s.recording_session_id}')">
                 <svg class="w-3 h-3 inline mr-1" fill="currentColor" viewBox="0 0 20 20"><path d="M6.3 2.841A1.5 1.5 0 004 4.11V15.89a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z"/></svg>
                 ▶ View Recording
                </button>`
             : ''}
+          <button class="btn-danger text-xs px-3 py-1" onclick="deleteAnalysis('${s.camera_id}', '${s.id}')">
+            🗑️ Delete
+          </button>
         </div>
       </div>`;
     }).join('');
+}
+
+async function deleteAnalysis(cameraId, sessionId) {
+  if (!confirm('Are you sure you want to delete this analysis session?')) return;
+  const data = await api('DELETE', `/cameras/${cameraId}/analysis/sessions/${sessionId}`);
+  if (data && data.error) { toast(data.message, true); return; }
+  toast('Analysis session deleted.');
+  loadAnalysisSessions();
+}
+
+async function viewLiveStreamForAnalysis(cameraId) {
+  const data = await api('GET', `/cameras/${cameraId}`);
+  if (!data || data.error) { toast(data?.message || 'Camera not found', true); return; }
+  // Only connect UI, assume background already running
+  document.getElementById('lrCamName').textContent = data.name + ' (Analysis)';
+  document.getElementById('lrStatus').textContent = 'Connecting via WebSocket...';
+  document.getElementById('liveDrawer').classList.remove('hidden');
+  
+  const timer = setInterval(() => {
+    let s = liveState.startTime ? Math.floor((Date.now() - liveState.startTime) / 1000) : 0;
+    document.getElementById('lrTimer').textContent = String(Math.floor(s/60)).padStart(2,'0') + ':' + String(s%60).padStart(2,'0');
+  }, 1000);
+  
+  liveState.streamId = cameraId;
+  liveState.dbCamId = cameraId;
+  liveState.timer = timer;
+  liveState.startTime = Date.now();
+  openDrawerWS(cameraId);
 }
 
 // ── Utils ───────────────────────────────────────────────────

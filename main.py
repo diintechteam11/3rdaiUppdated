@@ -887,7 +887,13 @@ async def analysis_stop(camera_id: str, body: AnalysisStopBody, db: Session = De
     db.commit()
 
     if camera_id in camera_processes:
-        camera_processes[camera_id]["processor"].stop_recording(stopped_by=body.stopped_by)
+        try:
+            camera_processes[camera_id]["processor"].stop_recording(stopped_by=body.stopped_by)
+            # Fully stop the feed and AI processor
+            camera_processes[camera_id]["processor"].stop()
+            del camera_processes[camera_id]
+        except Exception as e:
+            print(f"Error stopping processor: {e}")
 
     return {
         "recording_id": rec.id if rec else None,
@@ -900,6 +906,15 @@ async def analysis_stop(camera_id: str, body: AnalysisStopBody, db: Session = De
         "analysis_result": body.analysis_result,
         "saved_at": iso(now),
     }
+
+
+@app.delete("/api/v1/cameras/{camera_id}/analysis/sessions/{session_id}", status_code=204)
+async def delete_analysis_session(camera_id: str, session_id: str, db: Session = Depends(get_db), _key=Depends(require_api_key)):
+    sess = db.query(AnalysisSession).filter(AnalysisSession.id == session_id).first()
+    if sess:
+        db.delete(sess)
+        db.commit()
+    return Response(status_code=204)
 
 
 @app.get("/api/v1/cameras/{camera_id}/analysis/sessions")
