@@ -107,8 +107,7 @@ class Detection(Base):
     __tablename__ = "detections"
 
     id = Column(Integer, primary_key=True, index=True)
-    task_id = Column(String)  # This is the Camera ID
-    analysis_session_id = Column(String, ForeignKey("analysis_sessions.id"), nullable=True)
+    task_id = Column(String)
     filename = Column(String)
     timestamp = Column(String)
     trigger = Column(String)

@@ -618,12 +618,6 @@ async function startAnalysis() {
   document.getElementById('an-stop-cam-id').value = camera_id;
   document.getElementById('an-session-id').value = data.analysis_session_id;
   toast(`✅ Analysis [${analysis_type}] started! Session: ${data.analysis_session_id}`);
-
-  // Automatically start live stream preview
-  const camRes = await api('GET', `/cameras/${camera_id}`);
-  if (camRes && !camRes.error) {
-    startLiveStream(camRes);
-  }
 }
 
 async function stopAnalysis() {
@@ -673,7 +667,7 @@ async function loadAnalysisSessions() {
           ${s.analysis_result?`<div class="mt-1 p-2 rounded-lg bg-white/5 text-slate-300">Result: ${s.analysis_result}</div>`:''}
         </div>
         <div class="flex gap-2 flex-wrap">
-          <button class="btn-primary text-xs px-3 py-1" onclick="loadDetectionFeed('${s.camera_id}', '${s.id}', this.dataset.label)" data-label="${label.replace(/"/g, '&quot;')}">
+          <button class="btn-primary text-xs px-3 py-1" onclick="loadDetectionFeed('${s.camera_id}', this.dataset.label)" data-label="${label.replace(/"/g, '&quot;')}">
             <svg class="w-3 h-3 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
             📊 View Detection Feed
           </button>
@@ -846,17 +840,15 @@ async function loadRecordingForSession(recordingSessionId) {
 // ═══════════════════════════════════════════════════════════
 let _allDetections = [];
 
-async function loadDetectionFeed(cameraId, sessionId='', label='') {
-  document.getElementById('feedModalTitle').textContent = `Detection Feed — ${label||cameraId}`;
+async function loadDetectionFeed(cameraId, sessionLabel='') {
+  document.getElementById('feedModalTitle').textContent = `Detection Feed — ${sessionLabel||cameraId}`;
   document.getElementById('feedModalCount').textContent = 'Loading…';
   document.getElementById('feedGrid').innerHTML = '<div style="text-align:center;padding:40px;color:#64748b;">Loading detections…</div>';
   document.getElementById('feedModal').classList.remove('hidden');
 
   const k = getKey(); if (!k) return;
   try {
-    let url = `/api/v1/cameras/${cameraId}/detections?page_size=100`;
-    if (sessionId) url += `&analysis_id=${sessionId}`;
-    const res = await fetch(url, { headers: {'X-API-Key': k} });
+    const res = await fetch(`/api/v1/cameras/${cameraId}/detections?page_size=100`, { headers: {'X-API-Key': k} });
     const data = await res.json();
     _allDetections = data.detections || [];
     document.getElementById('feedModalCount').textContent = `${_allDetections.length} of ${data.total} detections`;
