@@ -555,9 +555,8 @@ class LiveCameraProcessor:
                                         "filename": self.camera_link,
                                         "timestamp": 0.0,
                                         "trigger": a_trigger_name,
-                                        "event": f"Detection (ID: {a_obj_id})",
-                                        "image_plate_url": a_r2_plate_url or a_local_plate_path,
-                                        "image_object_url": a_r2_object_url or a_local_object_path,
+                                        "image_plate_url": a_local_plate_path or a_r2_plate_url,
+                                        "image_object_url": a_local_object_path or a_r2_object_url,
                                         "plate_number": a_plate_text or None,
                                         "vehicle_color": a_v_color if a_v_color != "Unknown" else None
                                     }
@@ -808,8 +807,8 @@ def process_video(task_id, input_path, output_path, selected_triggers):
                             "timestamp": round(frame_count / fps, 2),
                             "trigger": trigger_name,
                             "event": f"Detection (ID: {obj_id})",
-                            "image_plate_url": r2_plate_url or local_plate_path,
-                            "image_object_url": r2_object_url or local_object_path,
+                            "image_plate_url": local_plate_path or r2_plate_url,
+                            "image_object_url": local_object_path or r2_object_url,
                             "plate_number": plate_text or None,
                             "vehicle_color": v_color if v_color != "Unknown" else None
                         }
