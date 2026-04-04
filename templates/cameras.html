@@ -697,24 +697,40 @@ async function deleteAnalysis(cameraId, sessionId) {
   loadAnalysisSessions();
 }
 
-async function viewLiveStreamForAnalysis(cameraId) {
-  const data = await api('GET', `/cameras/${cameraId}`);
-  if (!data || data.error) { toast(data?.message || 'Camera not found', true); return; }
-  // Only connect UI, assume background already running
-  document.getElementById('lrCamName').textContent = data.name + ' (Analysis)';
-  document.getElementById('lrStatus').textContent = 'Connecting via WebSocket...';
-  document.getElementById('liveDrawer').classList.remove('hidden');
+let lsModalWS = null;
+function viewLiveStreamForAnalysis(cameraId) {
+  document.getElementById('liveStreamModal').classList.remove('hidden');
+  document.getElementById('lsStatus').textContent = 'Connecting via WebSocket...';
+  document.getElementById('lsStatus').style.display = 'block';
   
-  const timer = setInterval(() => {
-    let s = liveState.startTime ? Math.floor((Date.now() - liveState.startTime) / 1000) : 0;
-    document.getElementById('lrTimer').textContent = String(Math.floor(s/60)).padStart(2,'0') + ':' + String(s%60).padStart(2,'0');
-  }, 1000);
+  if (lsModalWS) { lsModalWS.close(); lsModalWS = null; }
+  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const ws = new WebSocket(`${protocol}//${location.host}/ws-camera/${cameraId}`);
+  ws.binaryType = 'arraybuffer';
+  const canvas = document.getElementById('lsCanvas');
+  const ctx = canvas.getContext('2d');
+  const img = new Image();
+  const statusEl = document.getElementById('lsStatus');
   
-  liveState.streamId = cameraId;
-  liveState.dbCamId = cameraId;
-  liveState.timer = timer;
-  liveState.startTime = Date.now();
-  openDrawerWS(cameraId);
+  ws.onopen = () => { statusEl.style.display = 'none'; };
+  ws.onmessage = e => {
+    statusEl.style.display = 'none';
+    const blob = new Blob([e.data], { type: 'image/jpeg' });
+    const url = URL.createObjectURL(blob);
+    img.onload = () => { canvas.width = img.width; canvas.height = img.height; ctx.drawImage(img,0,0); URL.revokeObjectURL(url); };
+    img.src = url;
+  };
+  ws.onclose = () => { statusEl.style.display = 'block'; statusEl.textContent = 'Disconnected / Analysis Stopped'; };
+  lsModalWS = ws;
+}
+
+function closeLiveStreamModal(e) {
+  if (e && e.target !== e.currentTarget) return;
+  if(lsModalWS) { lsModalWS.close(); lsModalWS = null; }
+  document.getElementById('liveStreamModal').classList.add('hidden');
+  const canvas = document.getElementById('lsCanvas');
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
 }
 
 // ── Utils ───────────────────────────────────────────────────
@@ -1032,6 +1048,20 @@ window.addEventListener('DOMContentLoaded', () => {
     </div>
     <div id="lrVideoArea" style="display:none;">
       <canvas id="lrCanvas" style="width:100%;max-height:300px;background:#000;border-radius:10px;display:block;"></canvas>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ LIVE STREAM ANALYSIS MODAL ═════════════════════════════════════════ -->
+<div id="liveStreamModal" class="hidden modal-overlay" onclick="closeLiveStreamModal(event)">
+  <div onclick="event.stopPropagation()" style="background:#0a0f1e;border:1px solid rgba(255,255,255,0.12);border-radius:20px;padding:20px;width:90%;max-width:900px;display:flex;flex-direction:column;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <span style="color:#e2e8f0;font-weight:600;">Live Stream AI Analysis</span>
+      <button onclick="closeLiveStreamModal()" style="background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.12);color:#94a3b8;border-radius:8px;padding:5px 14px;cursor:pointer;">✕ Close Stream</button>
+    </div>
+    <div style="position:relative;background:#000;border-radius:12px;overflow:hidden;min-height:300px;display:flex;align-items:center;justify-content:center;flex-grow:1;">
+       <div id="lsStatus" style="position:absolute;color:#fbbf24;z-index:10;font-size:14px;">Connecting via WebSocket...</div>
+       <canvas id="lsCanvas" style="width:100%;max-height:75vh;position:relative;z-index:20;"></canvas>
     </div>
   </div>
 </div>

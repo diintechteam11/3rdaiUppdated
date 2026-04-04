@@ -377,7 +377,8 @@ class LiveCameraProcessor:
             self.raw_frame_buffer = frame
 
     def _process_loop(self):
-        crops_dir = os.path.join("static", "crops", self.camera_id)
+        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        crops_dir = os.path.join(base_dir, "static", "crops", self.camera_id)
         os.makedirs(crops_dir, exist_ok=True)
         
         print(f"[PROCESSOR] Started {self.camera_id} loop (Object ID: {id(self)})")
@@ -694,7 +695,8 @@ class LiveCameraProcessor:
 
 def process_video(task_id, input_path, output_path, selected_triggers):
     logs = []
-    crops_dir = os.path.join("static", "crops", task_id)
+    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+    crops_dir = os.path.join(base_dir, "static", "crops", task_id)
     os.makedirs(crops_dir, exist_ok=True)
     
     loaded_models = {t: get_model(t) for t in selected_triggers if get_model(t)}
