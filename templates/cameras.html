@@ -231,25 +231,52 @@
     </div>
   </div>
 
-  <div class="glass rounded-2xl p-4 mb-4 flex flex-wrap gap-3 items-end">
-    <div>
-      <p class="text-xs text-slate-500 mb-1">Camera ID</p>
-      <input id="an-list-cam" placeholder="Camera ID" style="max-width:220px">
+  <!-- ── Filter by Camera ID ── -->
+  <div class="glass rounded-2xl p-4 mb-4">
+    <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-3">🔎 Load Sessions by Camera ID</p>
+    <div class="flex flex-wrap gap-3 items-end">
+      <div>
+        <p class="text-xs text-slate-500 mb-1">Camera ID</p>
+        <input id="an-list-cam" placeholder="Camera ID" style="max-width:240px">
+      </div>
+      <div>
+        <p class="text-xs text-slate-500 mb-1">Analysis Type Filter</p>
+        <select id="an-filter-type" style="max-width:200px">
+          <option value="">All Types</option>
+          <option value="anpr_api">ANPR (API)</option>
+          <option value="no_helmet">No Helmet</option>
+          <option value="seatbelt">Seatbelt</option>
+          <option value="triple_riding">Triple Riding</option>
+          <option value="object_detection">Object Detection</option>
+          <option value="combined">Combined</option>
+        </select>
+      </div>
+      <button class="btn-primary" onclick="loadAnalysisSessions()">Load Sessions</button>
     </div>
-    <div>
-      <p class="text-xs text-slate-500 mb-1">Analysis Type Filter</p>
-      <select id="an-filter-type" style="max-width:220px">
-        <option value="">All Types</option>
-        <option value="anpr_api">ANPR (API)</option>
-        <option value="no_helmet">No Helmet</option>
-        <option value="seatbelt">Seatbelt</option>
-        <option value="triple_riding">Triple Riding</option>
-        <option value="object_detection">Object Detection</option>
-        <option value="combined">Combined</option>
-      </select>
-    </div>
-    <button class="btn-primary" onclick="loadAnalysisSessions()">Load Sessions</button>
   </div>
+
+  <!-- ── NEW: View Detection Feed by Recording ID ── -->
+  <div class="glass rounded-2xl p-5 mb-4" style="border:1px solid rgba(129,140,248,0.25);">
+    <div class="flex items-center gap-2 mb-3">
+      <svg style="width:16px;height:16px;color:#818cf8;flex-shrink:0;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+      </svg>
+      <p class="text-sm font-semibold text-indigo-300 uppercase tracking-wide">📊 View Detection Feed by Recording ID</p>
+    </div>
+    <p class="text-xs text-slate-500 mb-3">Enter a Recording Session ID to load its AI detection feed (plate crops, helmet detections, etc.).</p>
+    <div class="flex flex-wrap gap-3 items-end">
+      <div style="flex:1;min-width:280px;">
+        <p class="text-xs text-slate-500 mb-1">Recording / Session ID</p>
+        <input id="an-rec-id-input" placeholder="e.g. 3fa85f64-5717-4562-b3fc-2c963f66afa6">
+      </div>
+      <button class="btn-primary" onclick="loadDetectionFeedByRecordingId()" style="white-space:nowrap;">
+        <svg style="width:13px;height:13px;display:inline;margin-right:4px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+        Load Detection Feed
+      </button>
+    </div>
+    <div id="an-rec-id-status" style="display:none;margin-top:10px;font-size:12px;color:#94a3b8;"></div>
+  </div>
+
   <div id="analysisList" class="space-y-3"></div>
 </div>
 
@@ -695,6 +722,63 @@ async function deleteAnalysis(cameraId, sessionId) {
   if (data && data.error) { toast(data.message, true); return; }
   toast('Analysis session deleted.');
   loadAnalysisSessions();
+}
+
+// ═══════════════════════════════════════════════════════════
+// LOAD DETECTION FEED BY RECORDING ID
+// ═══════════════════════════════════════════════════════════
+async function loadDetectionFeedByRecordingId() {
+  const recordingId = document.getElementById('an-rec-id-input').value.trim();
+  if (!recordingId) { toast('Please enter a Recording ID.', true); return; }
+
+  const statusEl = document.getElementById('an-rec-id-status');
+  statusEl.style.display = 'block';
+  statusEl.textContent = '⏳ Looking up recording…';
+  statusEl.style.color = '#94a3b8';
+
+  const k = getKey();
+  if (!k) {
+    statusEl.style.display = 'none';
+    return;
+  }
+
+  try {
+    // Step 1: Fetch the recording to resolve camera_id and video name
+    const res = await fetch(`/api/v1/recordings/${recordingId}`, {
+      headers: { 'X-API-Key': k }
+    });
+
+    if (!res.ok) {
+      statusEl.textContent = `❌ Recording not found (HTTP ${res.status}). Check the ID and try again.`;
+      statusEl.style.color = '#f87171';
+      return;
+    }
+
+    const rec = await res.json();
+    if (rec.error) {
+      statusEl.textContent = `❌ ${rec.message}`;
+      statusEl.style.color = '#f87171';
+      return;
+    }
+
+    // Step 2: Use resolved camera_id to load the detection feed
+    const feedLabel = rec.video_name
+      ? `${rec.video_name} (Recording)`
+      : `Recording ${recordingId.slice(0, 8)}…`;
+
+    statusEl.textContent = `✅ Found recording on camera ${rec.camera_id.slice(0, 8)}… — loading detection feed…`;
+    statusEl.style.color = '#34d399';
+
+    // Small delay so user can read the status, then open modal
+    setTimeout(() => {
+      statusEl.style.display = 'none';
+      loadDetectionFeed(rec.camera_id, feedLabel);
+    }, 600);
+
+  } catch (e) {
+    statusEl.textContent = `❌ Error: ${e.message}`;
+    statusEl.style.color = '#f87171';
+  }
 }
 
 let lsModalWS = null;
